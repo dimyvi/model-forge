@@ -1,13 +1,12 @@
 import axios from 'axios';
+import { getLanguage } from '../utils/language';
 
 const api = axios.create({
   baseURL: '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 api.interceptors.request.use((config) => {
+  config.headers['Accept-Language'] = getLanguage();
   const token = localStorage.getItem('auth_token');
 
   if (token) {
@@ -28,15 +27,14 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
     return fallback;
   }
 
-  const messages = Object.values(data).flatMap((value) => {
-    if (Array.isArray(value)) {
-      return value.map(String);
-    }
+  function collectMessages(value: unknown): string[] {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.flatMap(collectMessages);
+    if (value && typeof value === 'object') return Object.values(value).flatMap(collectMessages);
+    return [];
+  }
 
-    return [String(value)];
-  });
-
-  return messages.join(' ') || fallback;
+  return collectMessages(data).join('\n') || fallback;
 }
 
 export default api;

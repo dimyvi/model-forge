@@ -42,7 +42,9 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     
     'api',
-    'users'
+    'users',
+    'datasets',
+    'experiments',
 ]
 
 MIDDLEWARE = [
@@ -131,3 +133,6 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

@@ -1,73 +1,64 @@
+import { t, useLanguage, translateMessage } from '../utils/language';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import { Link } from 'react-router-dom';
+import api, { getApiErrorMessage } from '../services/api';
+import Icon from '../components/Icon';
+import { getFilename, statusLabels } from '../utils/display';
 
-type User = {
-  id: number;
-  username: string;
-  email: string;
-};
+type Dataset = { id: number; file: string };
+type Experiment = { id: number; dataset: number; target_column: string; status: string; created_at: string };
 
 function HomePage() {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
+  const { locale } = useLanguage();
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    async function loadUser() {
+    let cancelled = false;
+    async function loadDashboard() {
       try {
-        const response = await api.get<User>('/auth/me/');
-        setUser(response.data);
-      } catch {
-        localStorage.removeItem('auth_token');
-        navigate('/login', { replace: true });
-      } finally {
-        setIsLoading(false);
-      }
+        const [data, history] = await Promise.all([api.get<Dataset[]>('/datasets/'), api.get<Experiment[]>('/experiments/')]);
+        if (!cancelled) { setDatasets(data.data); setExperiments(history.data); }
+      } catch (requestError) {
+        if (!cancelled) setError(getApiErrorMessage(requestError, 'Не удалось загрузить обзор. Обновите страницу.'));
+      } finally { if (!cancelled) setIsLoading(false); }
     }
+    loadDashboard();
+    return () => { cancelled = true; };
+  }, []);
 
-    loadUser();
-  }, [navigate]);
-
-  async function handleLogout() {
-    try {
-      await api.post('/auth/logout/');
-    } finally {
-      localStorage.removeItem('auth_token');
-      navigate('/login', { replace: true });
-    }
-  }
-
-  if (isLoading) {
-    return (
-      <div className="container py-5">
-        <p>Загрузка...</p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
+  const recent = [...experiments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 4);
 
   return (
-    <div className="container py-5">
-      <nav className="navbar navbar-light bg-white rounded shadow-sm px-3 mb-4">
-        <span className="navbar-brand mb-0 h1">Model Forge</span>
-        <button className="btn btn-outline-danger" onClick={handleLogout}>
-          Выйти
-        </button>
-      </nav>
-
-      <div className="p-4 bg-white rounded shadow-sm">
-        <h1 className="display-6">Добро пожаловать, {user.username}!</h1>
-        <p className="text-muted mb-0">
-          Это главная страница Model Forge. Здесь появятся проекты, датасеты и
-          эксперименты.
-        </p>
+    <div className="overview-page">
+      <div className="page-heading"><div><h1>{t("Обзор")}</h1><p>{t("Ваши данные и последние эксперименты.")}</p></div><Link to="/train" className="btn btn-primary"><Icon name="plus" />{t("Новый эксперимент")}</Link></div>
+      {error && <div className="alert alert-danger" role="alert">{translateMessage(error)}</div>}
+      <div className="overview-stats" aria-label={t("Статистика рабочего пространства")}>
+        <Link to="/datasets" className="overview-stat"><Icon name="dataset" size={20} /><span><span className="stat-label">{t("Датасеты")}</span><strong>{isLoading ? '—' : datasets.length}</strong></span><Icon name="arrow" size={16} /></Link>
+        <Link to="/experiments" className="overview-stat"><Icon name="experiment" size={20} /><span><span className="stat-label">{t("Эксперименты")}</span><strong>{isLoading ? '—' : experiments.length}</strong></span><Icon name="arrow" size={16} /></Link>
       </div>
+      <div className="overview-grid">
+        <section className="card recent-panel">
+          <div className="panel-heading"><h2>{t("Последние эксперименты")}</h2><Link to="/experiments" className="quiet-link">{t("Все эксперименты")}<Icon name="arrow" size={15} /></Link></div>
+          {isLoading ? <div className="empty-state" role="status">{t("Загружаем эксперименты…")}</div>
+            : recent.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="experiment" size={28} /></span><h3>{error ? t('Данные недоступны') : t('Здесь появятся ваши эксперименты')}</h3><p>{error ? t('Попробуйте обновить страницу немного позже.') : t('Начните с CSV-файла, выберите целевую колонку и сохраните настройки.')}</p></div>
+              : <div className="recent-list">{recent.map((experiment) => (
+                <Link to={experiment.status === 'ready' ? `/experiments/${experiment.id}/edit` : '/experiments'} key={experiment.id} className="recent-item">
+                  <span className="recent-item-icon"><Icon name="experiment" /></span>
+                  <span className="recent-item-details"><strong>{t('Эксперимент #{id}', { id: experiment.id })}</strong><span>{getFilename(datasets.find((item) => item.id === experiment.dataset)?.file ?? t('Датасет #{id}', { id: experiment.dataset }))} · {t('цель')}: {experiment.target_column}</span></span>
+                  <span className="recent-item-meta"><span className={`status-pill status-${experiment.status}`}>{statusLabels[experiment.status] ? t(statusLabels[experiment.status]) : experiment.status}</span><small>{new Date(experiment.created_at).toLocaleDateString(locale, { day: 'numeric', month: 'short' })}</small></span>
+                </Link>
+              ))}</div>}
+        </section>
+        <aside className="getting-started"><div className="section-kicker">{t("С чего начать")}</div><h2>{t("От данных к эксперименту")}</h2>
+          <ol className="guide-steps"><li><strong>{t("Подготовьте CSV")}</strong><p>{t("Названия колонок — в первой строке.")}</p></li><li><strong>{t("Выберите цель")}</strong><p>{t("Какую колонку должна предсказывать модель?")}</p></li><li><strong>{t("Сохраните настройки")}</strong><p>{t("К ним можно вернуться и внести изменения.")}</p></li></ol>
+          <Link to="/help" className="quiet-link">{t("Инструкция по работе")}<Icon name="arrow" size={15} /></Link>
+        </aside>
+      </div>
+      <p className="workspace-note">{t("Сейчас вы можете подготовить данные и настройки. Обучение и скачивание модели появятся позже.")}</p>
     </div>
   );
 }
-
 export default HomePage;

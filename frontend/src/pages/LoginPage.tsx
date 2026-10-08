@@ -1,9 +1,13 @@
+import { t, useLanguage, translateMessage } from '../utils/language';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../services/api';
+import Icon from '../components/Icon';
+import LanguagePicker from '../components/LanguagePicker';
 
 function LoginPage() {
+  useLanguage();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -36,28 +40,30 @@ function LoginPage() {
   }
 
   return (
-    <div className="container">
-      <div className="row justify-content-center min-vh-100 align-items-center">
+    <div className="auth-page container-fluid">
+      <div className="row justify-content-center min-vh-100 align-items-center g-0">
         <div className="col-12 col-md-6 col-lg-4">
-          <div className="card shadow-sm">
-            <div className="card-body p-4">
-              <h1 className="h3 text-center mb-4">
-                Вход в Model Forge
-              </h1>
+          <div className="card auth-card">
+            <div className="card-body p-4 p-lg-5">
+              <div className="auth-brand mb-4">
+                <span className="brand-mark"><Icon name="experiment" size={21} /></span>
+                <span>Model Forge</span>
+              </div>
+              <h1 className="h2 mb-2">{t("С возвращением")}</h1>
+              <p className="text-muted mb-4">{t("Войдите, чтобы продолжить работу с данными.")}</p>
 
-              {error && <div className="alert alert-danger">{error}</div>}
+              {error && <div className="alert alert-danger">{translateMessage(error)}</div>}
 
               <form onSubmit={handleSubmit}>
                 <div className="mb-3">
-                  <label htmlFor="username" className="form-label">
-                    Имя пользователя
-                  </label>
+                  <label htmlFor="username" className="form-label">{t("Имя пользователя")}</label>
 
                   <input
                     id="username"
                     type="text"
                     className="form-control"
-                    placeholder="Введите username"
+                    placeholder={t("Введите username")}
+                    autoComplete="username"
                     value={username}
                     onChange={(event) => setUsername(event.target.value)}
                     required
@@ -65,15 +71,14 @@ function LoginPage() {
                 </div>
 
                 <div className="mb-3">
-                  <label htmlFor="password" className="form-label">
-                    Пароль
-                  </label>
+                  <label htmlFor="password" className="form-label">{t("Пароль")}</label>
 
                   <input
                     id="password"
                     type="password"
                     className="form-control"
-                    placeholder="Введите пароль"
+                    placeholder={t("Введите пароль")}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
@@ -85,14 +90,15 @@ function LoginPage() {
                   className="btn btn-primary w-100"
                   disabled={isLoading}
                 >
-                  {isLoading ? 'Вход...' : 'Войти'}
+                  {isLoading ? t('Вход...') : t('Войти')}
                 </button>
               </form>
 
               <div className="text-center mt-3">
-                <span>Нет аккаунта? </span>
-                <Link to="/register">Зарегистрироваться</Link>
+                <span>{t("Нет аккаунта?")}</span>{' '}
+                <Link to="/register">{t("Зарегистрироваться")}</Link>
               </div>
+              <div className="auth-language"><LanguagePicker /></div>
             </div>
           </div>
         </div>

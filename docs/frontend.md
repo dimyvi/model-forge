@@ -27,3 +27,13 @@ npm run lint
 - `public/` — статические файлы, которые не обрабатываются сборщиком.
 
 Документация проекта находится в папке `docs`. Backend и frontend общаются через REST API Django.
+
+## Запуск через Docker Compose
+
+Frontend входит в общий локальный Compose-запуск проекта. Из корня проекта выполните:
+
+```bash
+docker compose -f local.docker-compose.yml up --build
+```
+
+После запуска откройте `http://localhost:5173`. Vite проксирует запросы `/api` к контейнеру Django `backend`.

@@ -10,13 +10,13 @@
    cp .env.example .env
    ```
 
-2. Из корня проекта запустите Django, PostgreSQL и ML-worker:
+2. Из корня проекта одной командой запустите PostgreSQL, Django, ML-worker и React:
 
    ```bash
    docker compose -f local.docker-compose.yml up -d --build
    ```
 
-   Django сам применит миграции. Worker запустится после готовности API. API будет доступно на `http://localhost:8000`; это сервер данных, React открывается отдельно.
+   Django сам применит миграции. Worker и frontend запустятся после готовности API. API будет доступно на `http://localhost:8000`, React — на `http://localhost:5173`.
 
    Посмотреть состояние и логи:
 
@@ -25,17 +25,9 @@
    docker compose -f local.docker-compose.yml logs -f backend ml-worker
    ```
 
-3. В другом терминале запустите frontend:
-
-   ```bash
-   cd frontend
-   npm ci
-   npm run dev
-   ```
-
-   Откройте адрес, который покажет Vite (обычно `http://localhost:5173`).
-
 Если Django уже запущен вручную на порту `8000`, остановите его перед запуском Compose, чтобы освободить порт.
+
+В режиме Compose frontend проксирует запросы `/api` к сервису `backend` внутри Docker-сети. Поэтому отдельный запуск `npm run dev` не нужен. Если frontend нужен без Docker, его по-прежнему можно запустить из папки `frontend` командами `npm ci` и `npm run dev`.
 
 PostgreSQL хранит данные в Docker volume `postgres_data`, файлы датасетов — в `backend/media/datasets`, модели — в `backend/media/artifacts`. Для остановки используйте `docker compose -f local.docker-compose.yml down`: данные сохраняются. Для очереди и нескольких workers используйте PostgreSQL; SQLite оставлен для простых локальных проверок.
 

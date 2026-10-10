@@ -4,9 +4,9 @@ import { Link } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../services/api';
 import Icon from '../components/Icon';
 import { getFilename, statusLabels } from '../utils/display';
+import type { Experiment } from '../services/experiments';
 
 type Dataset = { id: number; file: string };
-type Experiment = { id: number; dataset: number; target_column: string; status: string; created_at: string };
 
 function HomePage() {
   const { locale } = useLanguage();
@@ -45,7 +45,7 @@ function HomePage() {
           {isLoading ? <div className="empty-state" role="status">{t("Загружаем эксперименты…")}</div>
             : recent.length === 0 ? <div className="empty-state"><span className="empty-icon"><Icon name="experiment" size={28} /></span><h3>{error ? t('Данные недоступны') : t('Здесь появятся ваши эксперименты')}</h3><p>{error ? t('Попробуйте обновить страницу немного позже.') : t('Начните с CSV-файла, выберите целевую колонку и сохраните настройки.')}</p></div>
               : <div className="recent-list">{recent.map((experiment) => (
-                <Link to={experiment.status === 'ready' ? `/experiments/${experiment.id}/edit` : '/experiments'} key={experiment.id} className="recent-item">
+                <Link to={`/experiments/${experiment.id}`} key={experiment.id} className="recent-item">
                   <span className="recent-item-icon"><Icon name="experiment" /></span>
                   <span className="recent-item-details"><strong>{t('Эксперимент #{id}', { id: experiment.id })}</strong><span>{getFilename(datasets.find((item) => item.id === experiment.dataset)?.file ?? t('Датасет #{id}', { id: experiment.dataset }))} · {t('цель')}: {experiment.target_column}</span></span>
                   <span className="recent-item-meta"><span className={`status-pill status-${experiment.status}`}>{statusLabels[experiment.status] ? t(statusLabels[experiment.status]) : experiment.status}</span><small>{new Date(experiment.created_at).toLocaleDateString(locale, { day: 'numeric', month: 'short' })}</small></span>
@@ -53,11 +53,11 @@ function HomePage() {
               ))}</div>}
         </section>
         <aside className="getting-started"><div className="section-kicker">{t("С чего начать")}</div><h2>{t("От данных к эксперименту")}</h2>
-          <ol className="guide-steps"><li><strong>{t("Подготовьте CSV")}</strong><p>{t("Названия колонок — в первой строке.")}</p></li><li><strong>{t("Выберите цель")}</strong><p>{t("Какую колонку должна предсказывать модель?")}</p></li><li><strong>{t("Сохраните настройки")}</strong><p>{t("К ним можно вернуться и внести изменения.")}</p></li></ol>
+          <ol className="guide-steps"><li><strong>{t("Подготовьте CSV")}</strong><p>{t("Названия колонок — в первой строке.")}</p></li><li><strong>{t("Выберите цель")}</strong><p>{t("Какую колонку должна предсказывать модель?")}</p></li><li><strong>{t('Сохраните и запустите эксперимент')}</strong><p>{t('Сравните метрики и скачайте обученную модель.')}</p></li></ol>
           <Link to="/help" className="quiet-link">{t("Инструкция по работе")}<Icon name="arrow" size={15} /></Link>
         </aside>
       </div>
-      <p className="workspace-note">{t("Сейчас вы можете подготовить данные и настройки. Обучение и скачивание модели появятся позже.")}</p>
+      <p className="workspace-note">{t('Загрузите данные, запустите обучение и скачайте модель на странице эксперимента.')}</p>
     </div>
   );
 }

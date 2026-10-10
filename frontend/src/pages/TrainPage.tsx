@@ -7,6 +7,8 @@ import FileDropzone from '../components/FileDropzone';
 import SelectField from '../components/SelectField';
 import AlgorithmChoices from '../components/AlgorithmChoices';
 import { getFilename } from '../utils/display';
+import type { Experiment } from '../services/experiments';
+import { useAvailableAlgorithms } from '../hooks/useAvailableAlgorithms';
 
 type Dataset = { id: number; file: string; uploaded_at: string };
 type DatasetDetails = Dataset & { columns: string[]; rows_count: number; preview: Record<string, string | null>[] };
@@ -14,6 +16,7 @@ type DatasetDetails = Dataset & { columns: string[]; rows_count: number; preview
 function TrainPage() {
   const { locale } = useLanguage();
   const navigate = useNavigate();
+  const algorithmOptions = useAvailableAlgorithms();
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [sourceMode, setSourceMode] = useState<'existing' | 'new'>('existing');
   const [selectedDatasetId, setSelectedDatasetId] = useState('');
@@ -27,6 +30,8 @@ function TrainPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [retry, setRetry] = useState(0);
+  const availableAlgorithms = algorithmOptions.available?.classification ?? [];
+  const selectedAlgorithms = algorithms.filter((algorithm) => availableAlgorithms.some((option) => option.id === algorithm));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -85,15 +90,16 @@ function TrainPage() {
   }
 
   async function handleCreateExperiment() {
-    if (!datasetDetails || !datasetDetails.columns.includes(targetColumn) || algorithms.length === 0) {
+    if (isCreating || algorithmOptions.isLoading) return;
+    if (!datasetDetails || !datasetDetails.columns.includes(targetColumn) || selectedAlgorithms.length === 0) {
       setError('Выберите целевую колонку и хотя бы один алгоритм.');
       return;
     }
     setError('');
     setIsCreating(true);
     try {
-      await api.post('/experiments/', { dataset: datasetDetails.id, task: 'classification', target_column: targetColumn, algorithms });
-      navigate('/experiments');
+      const response = await api.post<Experiment>('/experiments/', { dataset: datasetDetails.id, task: 'classification', target_column: targetColumn, algorithms: selectedAlgorithms });
+      navigate(`/experiments/${response.data.id}`);
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, 'Не удалось создать эксперимент.'));
     } finally { setIsCreating(false); }
@@ -108,8 +114,9 @@ function TrainPage() {
 
   return (
     <div className="experiment-builder">
-      <div className="page-heading"><div><h1>{t("Новый эксперимент")}</h1><p>{t("Выберите данные и сохраните параметры будущего обучения.")}</p></div></div>
+      <div className="page-heading"><div><h1>{t("Новый эксперимент")}</h1><p>{t("Выберите данные и настройте обучение моделей.")}</p></div></div>
       {error && <div className="alert alert-danger" role="alert">{translateMessage(error)}</div>}
+      {algorithmOptions.error && <div className="alert alert-danger" role="alert">{translateMessage(algorithmOptions.error)} <button type="button" className="btn btn-sm btn-outline-secondary" onClick={algorithmOptions.reload}>{t('Повторить загрузку алгоритмов')}</button></div>}
       <section className="card builder-section">
         <div className="builder-section-heading"><span className="step-number">1</span><div><h2>{t("Данные")}</h2><p>{t("Загрузите новый CSV или выберите файл из своего пространства.")}</p></div></div>
         <div className="source-switch" role="group" aria-label={t("Источник данных")}>
@@ -137,12 +144,12 @@ function TrainPage() {
             <SelectField label={t("Целевая колонка")} value={targetColumn} options={targetOptions} onChange={setTargetColumn} placeholder={t("Какую колонку предсказывать?")} hint={t("Остальные колонки будут использоваться как признаки.")} disabled={busy} />
             <div><span className="form-label d-block">{t("Задача")}</span><div className="task-value">{t("Классификация")}<span>{t("Категория или класс")}</span></div></div>
           </div>
-          <AlgorithmChoices value={algorithms} onChange={setAlgorithms} disabled={busy} />
+          {algorithmOptions.isLoading ? <p className="field-hint" role="status">{t('Загрузка алгоритмов…')}</p> : <AlgorithmChoices options={availableAlgorithms} value={selectedAlgorithms} onChange={setAlgorithms} disabled={busy} />}
           <details className="dataset-preview">
             <summary>{t("Первые строки данных")}<span>{t('Строк: {count}', { count: Math.min(datasetDetails.preview.length, 5) })}<Icon name="chevron" size={16} /></span></summary>
             <div className="table-responsive"><table className="table preview-table mb-0"><thead><tr>{datasetDetails.columns.map((column) => <th key={column} className={column === targetColumn ? 'target-cell' : ''}>{column}{column === targetColumn && <span className="target-label">{t("цель")}</span>}</th>)}</tr></thead><tbody>{datasetDetails.preview.slice(0, 5).map((row, index) => <tr key={index}>{datasetDetails.columns.map((column) => <td key={column} className={column === targetColumn ? 'target-cell' : ''}>{row[column] ?? '—'}</td>)}</tr>)}</tbody></table></div>
           </details>
-          <div className="builder-footer"><p>{t("Вы сохраните настройки. Обучение будет доступно позже.")}</p><button type="button" className="btn btn-primary" onClick={handleCreateExperiment} disabled={busy || !targetColumn || algorithms.length === 0}>{isCreating ? t('Сохранение…') : t('Сохранить эксперимент')}</button></div>
+          <div className="builder-footer"><p>{t("Сохраните настройки, затем запустите обучение на странице эксперимента.")}</p><button type="button" className="btn btn-primary" onClick={handleCreateExperiment} disabled={busy || algorithmOptions.isLoading || !targetColumn || selectedAlgorithms.length === 0}>{isCreating ? t('Сохранение…') : t('Сохранить эксперимент')}</button></div>
         </div>}
       </section>
     </div>

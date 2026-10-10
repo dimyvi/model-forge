@@ -1,0 +1,364 @@
+{
+  "info": {
+    "name": "Model Forge — API обучения",
+    "description": "Выполняйте запросы по порядку. В запросе загрузки выберите CSV с компьютера. Повторяйте проверку эксперимента до статуса completed, затем скачайте модель. Подробности — в docs/api.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "username",
+      "value": "forge_demo"
+    },
+    {
+      "key": "password",
+      "value": "Demo-training-pass-2026"
+    },
+    {
+      "key": "email",
+      "value": "forge_demo@example.com"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "dataset_id",
+      "value": ""
+    },
+    {
+      "key": "experiment_id",
+      "value": ""
+    },
+    {
+      "key": "result_id",
+      "value": ""
+    },
+    {
+      "key": "task",
+      "value": "classification"
+    },
+    {
+      "key": "target_column",
+      "value": "completed"
+    },
+    {
+      "key": "algorithms",
+      "value": "[\"logistic_regression\",\"random_forest\"]"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "Authorization",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "Token {{token}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Регистрация (только новый аккаунт)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/auth/register/",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Created\", () => pm.response.to.have.status(201));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Вход",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/auth/login/",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Login OK\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.collectionVariables.set(\"token\", pm.response.json().token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Текущий пользователь",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/auth/me/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Authenticated\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Доступные алгоритмы",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/experiments/algorithms/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Available algorithms\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Загрузка CSV (выбрать файл)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/datasets/",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": [],
+              "description": "Выберите локальный файл docs/examples/classification.csv. Ключ должен быть в нижнем регистре: file."
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Dataset created\", () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) pm.collectionVariables.set(\"dataset_id\", pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Просмотр датасета",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/datasets/{{dataset_id}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Preview OK\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Создание эксперимента",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/experiments/",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dataset\": {{dataset_id}},\n  \"task\": \"{{task}}\",\n  \"target_column\": \"{{target_column}}\",\n  \"algorithms\": {{algorithms}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Experiment ready\", () => { pm.response.to.have.status(201); pm.expect(pm.response.json().status).to.eql(\"ready\"); });",
+              "if (pm.response.code === 201) pm.collectionVariables.set(\"experiment_id\", pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Запуск обучения",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{base_url}}/api/experiments/{{experiment_id}}/start/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Accepted asynchronously\", () => { pm.response.to.have.status(202); pm.expect(pm.response.json().status).to.eql(\"queued\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Статус эксперимента (повторять до completed)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/experiments/{{experiment_id}}/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status OK\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  const experiment = pm.response.json();",
+              "  const best = experiment.results.find(result => result.is_best);",
+              "  if (best) pm.collectionVariables.set(\"result_id\", best.id);",
+              "  pm.test(\"Known status\", () => pm.expect([\"ready\", \"queued\", \"running\", \"completed\", \"failed\"]).to.include(experiment.status));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Скачивание модели (Send and Download)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/experiments/{{experiment_id}}/results/{{result_id}}/download/"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Model download\", () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Дополнительные проверки ошибок",
+      "item": [
+        {
+          "name": "Запрос без авторизации → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/experiments/{{experiment_id}}/",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Unauthorized\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Повторный запуск активного/completed эксперимента → 409",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/experiments/{{experiment_id}}/start/"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Duplicate rejected\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

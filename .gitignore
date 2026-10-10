@@ -19,8 +19,18 @@ frontend/dist/
 
 *.log
 
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 .vscode/
 .idea/
+.agents/
+.aws/
+.codex/
+.ruff_cache
+.gigacode_vsc
 
 .DS_Store
 Thumbs.db

@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,12 +21,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-b7v12hyx==$w3ibm&js*a1mbi%^5uw!!o^1-%1&0&9u62(cc(l'
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-b7v12hyx==$w3ibm&js*a1mbi%^5uw!!o^1-%1&0&9u62(cc(l',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', '1').lower() in {'1', 'true', 'yes'}
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        'DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,backend'
+    ).split(',')
+    if host.strip()
+]
 
 
 # Application definition
@@ -41,7 +51,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     
-    'api',
     'users',
     'datasets',
     'experiments',
@@ -80,12 +89,27 @@ WSGI_APPLICATION = 'backend_config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if os.environ.get('DB_ENGINE', 'postgresql').lower() in {'postgres', 'postgresql'}:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('DB_NAME', 'model_forge'),
+            'USER': os.environ.get('DB_USER', 'model_forge'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', 'model_forge_dev_password'),
+            'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
+            'PORT': os.environ.get('DB_PORT', '5432'),
+            'CONN_MAX_AGE': 60,
+            'OPTIONS': {'connect_timeout': 5},
+        }
     }
-}
+else:
+    # Keep SQLite available when explicitly selected for a lightweight fallback.
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -136,3 +160,7 @@ MAILERS = {
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Each training subprocess has a deadline; stale claims are recovered by workers.
+ML_TRAINING_TIMEOUT = int(os.environ.get('ML_TRAINING_TIMEOUT', '300'))
+ML_WORKER_POLL_INTERVAL = float(os.environ.get('ML_WORKER_POLL_INTERVAL', '2'))

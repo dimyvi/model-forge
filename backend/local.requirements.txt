@@ -1,0 +1,11 @@
+Django==6.1.2
+djangorestframework==3.18.1
+psycopg[binary]>=3.2,<4.0
+coverage>=7.6,<8.0
+
+# Tabular ML: versions tested together on Python 3.12.
+numpy==2.5.3
+pandas==3.0.6
+scipy==1.18.1
+scikit-learn==1.9.1
+joblib==1.6.0

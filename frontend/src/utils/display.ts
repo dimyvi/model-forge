@@ -8,6 +8,7 @@ export function getFilename(path: string) {
 export const algorithmLabels: Record<string, string> = {
   logistic_regression: 'Logistic Regression',
   random_forest: 'Random Forest',
+  linear_regression: 'Linear Regression',
 };
 
 export const statusLabels: Record<string, MessageKey> = {

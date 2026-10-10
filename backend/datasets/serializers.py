@@ -13,6 +13,8 @@ class DatasetSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'uploaded_at')
 
     def validate_file(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError('The CSV must not exceed 10 MiB.')
         if not value.name.lower().endswith('.csv'):
             raise serializers.ValidationError(
                 'Пока поддерживаются только CSV-файлы.'

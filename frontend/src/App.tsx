@@ -9,6 +9,7 @@ import DashboardLayout from './components/DashboardLayout';
 import DatasetsPage from './pages/DatasetsPage';
 import DatasetDetailPage from './pages/DatasetDetailPage';
 import ExperimentEditPage from './pages/ExperimentEditPage';
+import ExperimentDetailPage from './pages/ExperimentDetailPage';
 import ExperimentsPage from './pages/ExperimentsPage';
 import HomePage from './pages/HomePage';
 import HelpPage from './pages/HelpPage';
@@ -30,6 +31,7 @@ function App() {
           <Route path="/datasets" element={<DatasetsPage />} />
           <Route path="/datasets/:id" element={<DatasetDetailPage />} />
           <Route path="/experiments" element={<ExperimentsPage />} />
+          <Route path="/experiments/:id" element={<ExperimentDetailPage />} />
           <Route path="/experiments/:id/edit" element={<ExperimentEditPage />} />
           <Route path="/help" element={<HelpPage />} />
         </Route>

@@ -19,11 +19,22 @@ function FileDropzone({ file, onChange, disabled, onError }: Props) {
   }
 
   return (
-    <div className={`file-dropzone ${dragging ? 'is-dragging' : ''} ${file ? 'has-file' : ''}`} onDragOver={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); if (!disabled) selectFile(Array.from(event.dataTransfer.files)); }}>
+    <div
+      className={`file-dropzone ${dragging ? 'is-dragging' : ''} ${file ? 'has-file' : ''}`}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={t('Зона выбора CSV-файла')}
+      onClick={(event) => { if (!disabled && !(event.target as HTMLElement).closest('button')) input.current?.click(); }}
+      onKeyDown={(event) => { if (!disabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); input.current?.click(); } }}
+      onDragOver={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
+      onDrop={(event) => { event.preventDefault(); setDragging(false); if (!disabled) selectFile(Array.from(event.dataTransfer.files)); }}
+    >
       <input ref={input} id={id} type="file" accept=".csv,text/csv" className="visually-hidden" tabIndex={-1} aria-label={t("CSV-файл")} disabled={disabled} onChange={(event) => { if (event.target.files?.length) selectFile(Array.from(event.target.files)); event.target.value = ''; }} />
       <span className="file-icon"><Icon name={file ? 'file' : 'upload'} size={24} /></span>
-      <div className="file-description"><strong>{file ? file.name : t('Перетащите CSV-файл сюда')}</strong><span>{file ? `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(file.size < 1024 ? file.size : file.size / 1024)} ${file.size < 1024 ? t('Б') : t('КБ')} · CSV` : t('или выберите его на компьютере')}</span></div>
-      <div className="file-actions"><button type="button" className="btn btn-outline-secondary" disabled={disabled} onClick={() => input.current?.click()}>{file ? t('Заменить файл') : t('Выбрать файл')}</button>{file && <button type="button" className="icon-button" aria-label={t("Убрать выбранный файл")} disabled={disabled} onClick={() => onChange(null)}><Icon name="close" /></button>}</div>
+      <div className="file-description"><strong>{file ? file.name : t('Перетащите CSV-файл сюда')}</strong><span>{file ? `${t('Нажмите, чтобы заменить файл')} · ${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(file.size < 1024 ? file.size : file.size / 1024)} ${file.size < 1024 ? t('Б') : t('КБ')} · CSV` : t('или нажмите, чтобы выбрать файл')}</span></div>
+      {file && <div className="file-actions"><button type="button" className="icon-button" aria-label={t("Убрать выбранный файл")} disabled={disabled} onClick={() => onChange(null)}><Icon name="close" /></button></div>}
     </div>
   );
 }

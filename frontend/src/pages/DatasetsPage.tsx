@@ -82,7 +82,7 @@ function DatasetsPage() {
       ) : (
         <div className="card shadow-sm">
           <div className="table-responsive">
-            <table className="table table-hover align-middle mb-0">
+            <table className="table table-hover align-middle mb-0 dataset-table">
               <thead>
                 <tr>
                   <th>{t("Файл")}</th>
@@ -98,26 +98,25 @@ function DatasetsPage() {
                       {new Date(dataset.uploaded_at).toLocaleString(locale)}
                     </td>
                     <td className="text-end">
-                      <Link
-                        to={`/datasets/${dataset.id}`}
-                        className="btn btn-sm btn-outline-primary me-2"
-                      >{t("Открыть")}</Link>
+                      <div className="dataset-actions">
+                      <Link to={`/datasets/${dataset.id}`} className="btn btn-sm btn-outline-primary dataset-action-open">{t("Открыть")}</Link>
                       {pendingDeleteId === dataset.id && (
                         <button
                           type="button"
-                          className="btn btn-sm btn-secondary me-2"
+                          className="btn btn-sm btn-secondary dataset-action-cancel"
                           onClick={() => setPendingDeleteId(null)}
                         >{t("Отмена")}</button>
                       )}
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-danger"
+                        className="btn btn-sm btn-outline-danger dataset-action-delete"
                         onClick={() => handleDelete(dataset.id)}
                       >
                         {pendingDeleteId === dataset.id
-                          ? t('Подтвердить удаление')
+                          ? t('Подтвердить')
                           : t('Удалить')}
                       </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

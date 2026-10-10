@@ -31,6 +31,19 @@
 
 PostgreSQL хранит данные в Docker volume `postgres_data`, файлы датасетов — в `backend/media/datasets`, модели — в `backend/media/artifacts`. Для остановки используйте `docker compose -f local.docker-compose.yml down`: данные сохраняются. Для очереди и нескольких workers используйте PostgreSQL; SQLite оставлен для простых локальных проверок.
 
+## Базовые Docker-образы
+
+Для проекта не используются Alpine-образы для всех сервисов подряд. Выбор образа зависит от стека:
+
+| Сервис | Образ | Причина |
+| --- | --- | --- |
+| Django и ML-worker | `python:3.12-slim` | Хорошая совместимость с `numpy`, `pandas`, `scikit-learn`, `scipy` и готовыми Python wheel-пакетами |
+| React/Vite | `node:20-alpine` | Frontend не содержит тяжёлых Python-зависимостей, поэтому Alpine подходит |
+| PostgreSQL | `postgres:16-alpine` | Официальный компактный образ базы данных |
+| Nginx | `nginx:alpine` | Компактный образ для раздачи frontend и reverse proxy |
+
+Backend намеренно использует `python:3.12-slim`, а не Alpine. Alpine основан на `musl libc`, из-за чего ML-библиотеки могут собираться из исходников и давать проблемы совместимости. Для Python ML-сервиса Debian Slim надёжнее. Файлы сборки называются `local.Dockerfile` во всех сервисах, где используется локальная Docker-сборка.
+
 ## Как пользоваться обучением
 
 1. Откройте React, зарегистрируйтесь или войдите.
@@ -78,6 +91,8 @@ docker compose -f local.docker-compose.yml run --rm backend coverage report --rc
 Coverage считает покрытие `users`, `datasets`, `experiments` и `ml_engine`; миграции и сами тесты в отчёт не входят. Отчёт показывает общий процент, а также непокрытые строки. Настроенный минимальный порог — 70%.
 
 ## Архитектура обучения
+
+Целевая Kubernetes-архитектура с разделением dev/prod, Redis/Celery, MinIO, MLflow и мониторингом описана в [отдельной схеме](kubernetes-architecture.md).
 
 ```text
 React → Django API → очередь в PostgreSQL

@@ -8,3 +8,5 @@ staticfiles/
 .coverage*
 coverage.xml
 htmlcov/
+.env
+.env.*

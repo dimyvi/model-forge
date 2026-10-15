@@ -1,5 +1,7 @@
 # Model Forge
 
+Инструкция по развёртыванию на PROD: [production-deployment.md](production-deployment.md). Локальная разработка описана ниже.
+
 ## Локальный запуск
 
 Нужны Docker Compose и Node.js. Все команды ниже выполняются из корня проекта `/home/dv/Documents/model-forge`, даже если этот README открыт в папке `docs`.

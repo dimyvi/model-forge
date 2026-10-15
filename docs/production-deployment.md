@@ -1,0 +1,116 @@
+# Развёртывание Model Forge на PROD
+
+Эта инструкция рассчитана на текущую схему: домен `model-forge.ru`, PROD-ВМ `192.168.1.169`, Nginx на самой ВМ и Docker Compose для приложения. Роутер направляет TCP 80/443 на PROD. Все команды выполняются на PROD из корня клонированного репозитория. DEV и CI/CD настраиваются отдельно.
+
+## Что запускается
+
+| Сервис | Назначение |
+| --- | --- |
+| `db` | PostgreSQL; порт не публикуется на хосте |
+| `migrate` | Однократно применяет миграции и собирает Django-статику |
+| `backend` | Django API через Gunicorn, только `127.0.0.1:8000` на хосте |
+| `ml-worker` | Выполняет обучение отдельно от HTTP-запросов |
+| `frontend` | Nginx в контейнере раздаёт собранный React и Django-статику, только `127.0.0.1:8080` на хосте |
+
+Внешний Nginx принимает запросы на 80/443 и отправляет `/api/` и `/admin/` в Django, остальные пути — в frontend. Прямой путь `/media/` закрыт; датасеты и модели выдаются только через защищённый API.
+
+## 1. Добавить production-файлы в репозиторий
+
+На рабочем компьютере проверьте изменения, создайте коммит и отправьте его в GitHub. На PROD обновите клон:
+
+```bash
+cd /opt/model-forge/model-forge
+git pull --ff-only origin main
+```
+
+Нужные файлы: `prod.docker-compose.yml`, оба `prod.Dockerfile`, `frontend/nginx.conf`, `deploy/nginx/model-forge.conf` и `.env.prod.example`. Файлы `local.*` остаются для разработки.
+
+## 2. Создать секреты на PROD
+
+Если на PROD ещё нет `.env`, создайте его из шаблона:
+
+```bash
+cp .env.prod.example .env
+chmod 600 .env
+```
+
+Откройте `.env` и заполните `POSTGRES_PASSWORD` и `DJANGO_SECRET_KEY` длинными случайными значениями. Для генерации одного значения можно выполнить `python3 -c 'import secrets; print(secrets.token_urlsafe(64))'`. Проверьте `DJANGO_ALLOWED_HOSTS` и `DJANGO_CSRF_TRUSTED_ORIGINS` для своего домена. Не добавляйте `.env` в Git и не пересылайте его содержимое в чат.
+
+Если `.env` уже существует, сначала проверьте его и сохраните действующие секреты: замена пароля существующей PostgreSQL только в `.env` не меняет пароль пользователя внутри базы.
+
+Если `.env` уже подготовлен на рабочем компьютере, его можно передать на PROD по SSH вместо создания из шаблона. Перед копированием убедитесь, что на PROD нет действующего `.env`, который нельзя перезаписывать. После передачи установите права `chmod 600 .env`. Локальный и production `.env` никогда не добавляются в Git.
+
+Отправка писем в текущем MVP ещё не используется. Для будущей почты в шаблоне есть настройки `DJANGO_EMAIL_*`; до подключения реального SMTP письма отправляться не будут. В production содержимое писем не выводится в логи.
+
+Проверьте, что Compose может прочитать конфигурацию:
+
+```bash
+docker compose -f prod.docker-compose.yml config --quiet
+```
+
+Если пароль или секретный ключ пусты, команда остановится с подсказкой.
+
+## 3. Запустить приложение
+
+```bash
+docker compose -f prod.docker-compose.yml up -d --build
+docker compose -f prod.docker-compose.yml ps -a
+```
+
+Дождитесь, пока `db`, `backend`, `ml-worker` и `frontend` будут запущены. Контейнер `migrate` должен завершиться с кодом `0`; это ожидаемо.
+
+Проверьте API и frontend на самой PROD-ВМ:
+
+```bash
+curl -f http://127.0.0.1:8000/api/health/
+curl -fI http://127.0.0.1:8080/
+```
+
+Если сервис не запустился, посмотрите его журнал:
+
+```bash
+docker compose -f prod.docker-compose.yml logs --tail=100 db migrate backend ml-worker frontend
+```
+
+## 4. Подключить Nginx на PROD-ВМ
+
+Скопируйте конфигурацию из репозитория в системный Nginx:
+
+```bash
+sudo cp deploy/nginx/model-forge.conf /etc/nginx/conf.d/model-forge.conf
+sudo setsebool -P httpd_can_network_connect on
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+`setsebool` нужен на Rocky Linux с SELinux: системный Nginx получает право обращаться к локальным портам контейнеров. Проверьте через домен:
+
+```bash
+curl -fI http://model-forge.ru/
+curl -f http://model-forge.ru/api/health/
+```
+
+Если проверка с домашней сети не проходит, проверьте сайт через мобильный интернет: роутер может не поддерживать обращение к своему внешнему IP из LAN.
+
+## 5. Включить HTTPS
+
+После успешной проверки HTTP получите сертификат Let's Encrypt для обоих имён через Certbot с плагином Nginx:
+
+```bash
+sudo dnf install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d model-forge.ru -d www.model-forge.ru --redirect
+sudo nginx -t
+sudo certbot renew --dry-run
+```
+
+Certbot дополнит установленную копию `model-forge.conf` настройками TLS и перенаправлением с HTTP на HTTPS. Файл в Git остаётся исходным HTTP-шаблоном, поэтому не копируйте его поверх работающей HTTPS-конфигурации при обычном обновлении приложения. Проверьте `https://model-forge.ru/` и `https://model-forge.ru/api/health/`.
+
+Проверка `python manage.py check --deploy` может показывать предупреждения про HSTS и `SECURE_SSL_REDIRECT`: перенаправление на HTTPS здесь выполняет системный Nginx, а HSTS пока намеренно не включён до устойчивой работы сертификата.
+
+## Данные и обновления
+
+PostgreSQL, файлы датасетов/моделей и Django-статика хранятся в отдельных Docker volumes `model-forge-prod_postgres_data`, `model-forge-prod_media_data` и `model-forge-prod_static_data`. Команда `docker compose -f prod.docker-compose.yml down` сохраняет данные, а вариант с `-v` удаляет эти volumes. Резервные копии базы и media нужно настроить до появления важных пользовательских данных.
+
+При ручном обновлении кода выполните `git pull --ff-only origin main` и `docker compose -f prod.docker-compose.yml up -d --build`; сервис `migrate` применит новые миграции и обновит статику. Перед обновлением с изменениями схемы базы сделайте резервную копию.
+
+Порты PostgreSQL, Gunicorn и frontend не пробрасываются на роутере. Снаружи доступны только 80/443 системного Nginx. Конфигурация DEV будет отдельной и не должна использовать production-секреты или volumes.

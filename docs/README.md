@@ -1,6 +1,10 @@
 # Model Forge
 
-Инструкция по развёртыванию на PROD: [production-deployment.md](production-deployment.md). Локальная разработка описана ниже.
+Основные инструкции:
+
+- [развёртывание на PROD](production-deployment.md);
+- [автоматические тесты и обновление DEV/PROD](ci-cd.md);
+- локальная разработка описана ниже.
 
 ## Локальный запуск
 

@@ -1,0 +1,240 @@
+name: Model Forge CI/CD
+
+on:
+  push:
+    branches:
+      - DEV
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download code
+        uses: actions/checkout@v4
+
+      - name: Backend tests
+        run: |
+          docker compose \
+            -f local.docker-compose.yml \
+            run --build --rm backend \
+            python manage.py test
+
+      - name: Stop test containers
+        if: always()
+        run: |
+          docker compose \
+            -f local.docker-compose.yml \
+            down -v --remove-orphans
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend checks
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+  deploy-dev:
+    name: Deploy DEV
+    if: github.event_name == 'push' && github.ref == 'refs/heads/DEV'
+    needs: tests
+    runs-on: [self-hosted, linux, x64, model-forge-dev]
+    timeout-minutes: 30
+
+    concurrency:
+      group: model-forge-dev-deployment
+      cancel-in-progress: false
+
+    steps:
+      - name: Save previous DEV images
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge
+
+          for service in backend ml-worker migrate frontend; do
+            image_id="$(
+              docker compose \
+                -p model-forge-dev \
+                --env-file .env \
+                -f prod.docker-compose.yml \
+                images -q "$service" 2>/dev/null \
+                | head -n 1 || true
+            )"
+
+            if [ -n "$image_id" ]; then
+              docker tag \
+                "$image_id" \
+                "model-forge-dev-${service}:previous"
+            fi
+          done
+
+      - name: Update DEV code
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge
+          git switch DEV
+          git pull --ff-only origin DEV
+
+      - name: Start DEV
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge
+
+          docker compose \
+            -p model-forge-dev \
+            --env-file .env \
+            -f prod.docker-compose.yml \
+            config --quiet
+
+          docker compose \
+            -p model-forge-dev \
+            --env-file .env \
+            -f prod.docker-compose.yml \
+            up -d --build --remove-orphans
+
+      - name: Check DEV
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/api/health/ \
+              && curl -fsSI http://127.0.0.1:8080/ > /dev/null; then
+              echo "DEV is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for DEV: ${attempt}/30"
+            sleep 2
+          done
+
+          echo "DEV health check failed"
+          exit 1
+
+      - name: Remove old DEV images
+        run: |
+          docker image prune -f
+          docker image ls | grep model-forge-dev || true
+
+  deploy-prod:
+    name: Deploy PROD
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: tests
+    runs-on: [self-hosted, linux, x64, model-forge-prod]
+    timeout-minutes: 40
+
+    concurrency:
+      group: model-forge-prod-deployment
+      cancel-in-progress: false
+
+    steps:
+      - name: Back up PROD database
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge/model-forge
+          mkdir -p /home/admin/model-forge-backups
+
+          backup_file="/home/admin/model-forge-backups/db-$(date +%Y%m%d-%H%M%S).sql.gz"
+
+          docker compose \
+            -p model-forge-prod \
+            --env-file .env \
+            -f prod.docker-compose.yml \
+            exec -T db \
+            sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+            | gzip > "$backup_file"
+
+          test -s "$backup_file"
+          echo "Backup created: $backup_file"
+
+      - name: Save previous PROD images
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge/model-forge
+
+          for service in backend ml-worker migrate frontend; do
+            image_id="$(
+              docker compose \
+                -p model-forge-prod \
+                --env-file .env \
+                -f prod.docker-compose.yml \
+                images -q "$service" 2>/dev/null \
+                | head -n 1 || true
+            )"
+
+            if [ -n "$image_id" ]; then
+              docker tag \
+                "$image_id" \
+                "model-forge-prod-${service}:previous"
+            fi
+          done
+
+      - name: Update PROD code
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge/model-forge
+          git switch main
+          git pull --ff-only origin main
+
+      - name: Start PROD
+        run: |
+          set -euo pipefail
+
+          cd /opt/model-forge/model-forge
+
+          docker compose \
+            -p model-forge-prod \
+            --env-file .env \
+            -f prod.docker-compose.yml \
+            config --quiet
+
+          docker compose \
+            -p model-forge-prod \
+            --env-file .env \
+            -f prod.docker-compose.yml \
+            up -d --build --remove-orphans
+
+      - name: Check PROD
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/api/health/ \
+              && curl -fsSI http://127.0.0.1:8080/ > /dev/null; then
+              echo "PROD is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for PROD: ${attempt}/30"
+            sleep 2
+          done
+
+          echo "PROD health check failed"
+          exit 1
+
+      - name: Remove old PROD images
+        run: |
+          docker image prune -f
+          docker image ls | grep model-forge-prod || true

@@ -1,14 +1,14 @@
 # CI/CD Model Forge
 
-[К документации проекта](README.md)
+[Документация проекта](README.md)
 
-CI/CD — проверки кода и автоматическое обновление приложения. Настройки находятся в `.github/workflows/ci-cd.yml`.
+Workflow `.github/workflows/ci-cd.yml` запускает проверки backend/frontend и обновляет DEV/PROD через Docker Compose.
 
-**Сейчас workflow разворачивает Docker Compose на прежних стендах.** Он ещё не публикует образы в GHCR и не обновляет новые кластеры K3s. План следующего этапа описан в [Kubernetes](kubernetes.md#порядок-переноса-model-forge).
+Публикация образов в registry и развёртывание в K3s входят в [план миграции](kubernetes.md#план-миграции).
 
-## Когда запускается workflow
+## События
 
-| Событие | Проверки | Что происходит после успеха |
+| Событие | Проверки | Развёртывание |
 | --- | --- | --- |
 | Push в `DEV` | Django tests, ESLint, сборка React | Обновление DEV через Compose |
 | Pull Request в `main` | Те же проверки | Только проверка |
@@ -16,16 +16,16 @@ CI/CD — проверки кода и автоматическое обновл
 
 Если изменены только файлы в `docs/`, workflow не запускается. При изменении кода вместе с документацией проверки выполняются.
 
-## Где выполняются задания
+## Runners
 
-Тесты идут на GitHub-hosted runner `ubuntu-latest`. Развёртывание — на self-hosted runner: это служба на сервере, которая получает задания из GitHub.
+Тесты выполняются на GitHub-hosted runner `ubuntu-latest`. Deploy-задания — на self-hosted runners соответствующих стендов.
 
 | Стенд Compose | Ветка | Label runner | Каталог приложения | Compose project |
 | --- | --- | --- | --- | --- |
 | DEV | `DEV` | `model-forge-dev` | `/opt/model-forge` | `model-forge-dev` |
 | PROD | `main` | `model-forge-prod` | `/opt/model-forge/model-forge` | `model-forge-prod` |
 
-Эти пути взяты из workflow; это не пути установки K3s. Runner работает от `admin`, которому нужен доступ к Docker.
+Службы runners работают от пользователя `admin` с доступом к Docker.
 
 Проверка службы на соответствующем сервере:
 
@@ -34,18 +34,18 @@ cd /opt/actions-runner
 sudo ./svc.sh status
 ```
 
-В GitHub список находится в `Settings → Actions → Runners`. Свободный runner отображается как `Idle`.
+Список в GitHub: `Settings → Actions → Runners`. Состояние свободного runner — `Idle`.
 
-## Как выпустить изменение
+## Выпуск изменений
 
-1. Внесите изменения в `DEV`, проверьте их локально и отправьте ветку в GitHub.
-2. Дождитесь успешного workflow и проверьте приложение на DEV.
-3. Создайте Pull Request из `DEV` в `main` и дождитесь проверок.
-4. После merge workflow обновит PROD. Проверьте полный сценарий с тестовым CSV.
+1. Внести изменения в `DEV`, выполнить локальные проверки и отправить ветку в GitHub.
+2. Дождаться успешного workflow и проверить приложение на DEV.
+3. Создать Pull Request из `DEV` в `main`, выполнить merge после проверок.
+4. После обновления PROD пройти сценарий с тестовым CSV.
 
-Прямой push в `main` тоже запускает обновление PROD. Ограничение таких push настраивается в правилах ветки GitHub; сам workflow их не запрещает.
+Push в `main` запускает обновление PROD независимо от наличия Pull Request. Ограничение прямых push задаётся правилами ветки GitHub.
 
-Перед обновлением deploy-задание сохраняет образы приложения с тегом `previous`, обновляет код и выполняет `docker compose up -d --build`. Затем проверяет ответы API и frontend и удаляет dangling-образы — образы без тега.
+Deploy-задание сохраняет текущие образы с тегом `previous`, обновляет код и выполняет `docker compose up -d --build`. После успешной HTTP-проверки API и frontend удаляются dangling-образы.
 
 Для PROD перед этим дополнительно создаётся дамп PostgreSQL:
 
@@ -53,17 +53,17 @@ sudo ./svc.sh status
 /home/admin/model-forge-backups/db-YYYYMMDD-HHMMSS.sql.gz
 ```
 
-Workflow проверяет, что файл непустой. Это не проверка восстановления. Файлы датасетов и моделей в этот дамп не входят.
+Workflow проверяет непустой размер дампа. Проверка восстановления и резервное копирование датасетов/моделей выполняются отдельно.
 
-## Если обновление не удалось
+## Диагностика
 
-| Где ошибка | Результат |
+| Этап с ошибкой | Результат |
 | --- | --- |
 | Тесты | Deploy не запускается |
 | Backup PROD | Обновление останавливается |
 | Сборка или HTTP-проверка | Deploy завершается с ошибкой; автоматического отката нет |
 
-Сначала откройте `Actions → Model Forge CI/CD → нужный запуск → упавший шаг`.
+Журнал выполнения в GitHub: `Actions → Model Forge CI/CD → запуск → шаг с ошибкой`.
 
 На DEV Compose-сервере из `/opt/model-forge`:
 
@@ -72,13 +72,12 @@ docker compose -p model-forge-dev -f prod.docker-compose.yml ps -a
 docker compose -p model-forge-dev -f prod.docker-compose.yml logs --tail=150
 ```
 
-На PROD из `/opt/model-forge/model-forge` замените `model-forge-dev` на `model-forge-prod`.
+Для PROD команды выполняются из `/opt/model-forge/model-forge` с параметром `-p model-forge-prod`.
 
 Тег `previous` сохраняет предыдущие образы для ручного восстановления. Откат образа не отменяет миграции базы. Для восстановления данных нужны дамп и проверенная процедура восстановления.
 
-## Что хранится отдельно
+## Секреты и доступ
 
 - `.env` находится на сервере и не попадает в Git. DEV и PROD используют разные секреты, базы и volumes.
-- Регистрационные токены runner и токены подключения K3s не записываются в документацию.
+- Регистрационные токены runners и токены подключения K3s хранятся вне репозитория.
 - Pull Request запускает проверки на GitHub-hosted runner. Deploy-задания выполняются после push в `DEV` или `main` и могут выполнять команды на сервере.
-- Изменение только документации не переносит runner и приложение в Kubernetes: для этого позже потребуется отдельное изменение workflow.

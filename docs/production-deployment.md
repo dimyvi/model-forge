@@ -1,12 +1,17 @@
 # Развёртывание через Docker Compose
 
-[К документации проекта](README.md) · [Автоматические обновления](ci-cd.md) · [План перехода на Kubernetes](kubernetes.md)
+[Документация проекта](README.md) · [CI/CD](ci-cd.md) · [Kubernetes](kubernetes.md)
 
-Эта инструкция описывает прежний Compose-стенд. По записи от 17 октября 2026 года PROD использовал `192.168.1.169`, DEV — `192.168.1.221`; PROD-домен — `model-forge.ru`, DEV — `dev.model-forge.ru`. Их доступность сейчас отдельно не проверялась. Новые ВМ K3s имеют другие адреса и перечислены в [разделе Kubernetes](kubernetes.md#наши-пять-вм).
+Конфигурация Compose-стендов до миграции в Kubernetes:
 
-Здесь приложение запускает Docker Compose, а системный Nginx принимает HTTP/HTTPS. Эти команды не устанавливают приложение в K3s. Обычные обновления существующего Compose-стенда выполняет [CI/CD](ci-cd.md).
+| Стенд | IP | Домен |
+| --- | --- | --- |
+| PROD | `192.168.1.169` | `model-forge.ru` |
+| DEV | `192.168.1.221` | `dev.model-forge.ru` |
 
-## Как устроен запуск
+Приложение работает в Docker Compose, внешний HTTP/HTTPS принимает системный Nginx. Обновления выполняет [GitHub Actions](ci-cd.md). Состав новой инфраструктуры описан в [Kubernetes](kubernetes.md#виртуальные-машины).
+
+## Сервисы
 
 | Сервис | Назначение |
 | --- | --- |
@@ -20,18 +25,18 @@
 
 В Dockerfile используются `python:3.12-slim` для Django/ML, `node:20-alpine` для сборки React и `nginx:alpine` для его раздачи. PostgreSQL использует `postgres:16-alpine`. Python Slim выбран для совместимости с готовыми пакетами ML-библиотек.
 
-## 1. Проверить сервер и код
+## Подготовка сервера
 
-На Compose-сервере должны быть установлены Docker с Compose, Nginx и Git. Репозиторий уже должен быть клонирован. Для принятого в workflow PROD-пути:
+Требования: Docker с Compose, Nginx, Git и клонированный репозиторий. Каталог PROD, используемый workflow:
 
 ```bash
 cd /opt/model-forge/model-forge
 git pull --ff-only origin main
 ```
 
-Все следующие команды Compose выполняются из этого каталога. Используются `prod.docker-compose.yml`, `backend/prod.Dockerfile`, `frontend/prod.Dockerfile` и конфигурации Nginx из репозитория.
+Далее команды выполняются из этого каталога. Конфигурация: `prod.docker-compose.yml`, `backend/prod.Dockerfile`, `frontend/prod.Dockerfile` и файлы Nginx в репозитории.
 
-## 2. Подготовить настройки
+## Переменные окружения
 
 Только если `.env` ещё нет:
 
@@ -40,45 +45,45 @@ cp .env.prod.example .env
 chmod 600 .env
 ```
 
-В редакторе заполните `POSTGRES_PASSWORD` и `DJANGO_SECRET_KEY`. Проверьте `DJANGO_ALLOWED_HOSTS` и `DJANGO_CSRF_TRUSTED_ORIGINS` для своих доменов. Для генерации случайного значения:
+Обязательные настройки: `POSTGRES_PASSWORD`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS` и `DJANGO_CSRF_TRUSTED_ORIGINS`. Генерация случайного значения для пароля или ключа:
 
 ```bash
 python3 -c 'import secrets; print(secrets.token_urlsafe(64))'
 ```
 
-Существующий `.env` сохраняйте. Смена пароля PostgreSQL только в `.env` не меняет пароль пользователя уже созданной базы. Настройки `DJANGO_EMAIL_*` оставлены для будущей почты: отправка писем в приложении пока не реализована.
+Существующий `.env` сохраняется при обновлении. Изменение `POSTGRES_PASSWORD` не меняет пароль пользователя уже созданной базы. Переменные `DJANGO_EMAIL_*` зарезервированы для почты; отправка писем не реализована.
 
-Проверьте конфигурацию без вывода секретов:
+Проверка конфигурации без вывода значений:
 
 ```bash
 docker compose -f prod.docker-compose.yml config --quiet
 ```
 
-## 3. Запустить и проверить контейнеры
+## Запуск
 
 ```bash
 docker compose -f prod.docker-compose.yml up -d --build
 docker compose -f prod.docker-compose.yml ps -a
 ```
 
-`db`, `backend`, `ml-worker` и `frontend` должны работать. Завершение `migrate` с кодом `0` — нормальный результат.
+Ожидаемое состояние: `db`, `backend`, `ml-worker` и `frontend` запущены, `migrate` завершён с кодом `0`.
 
 ```bash
 curl -f http://127.0.0.1:8000/api/health/
 curl -fI http://127.0.0.1:8080/
 ```
 
-Это проверяет HTTP-ответы. Для проверки базы, файлов и ML-worker после настройки HTTPS пройдите [первое обучение](README.md#первое-обучение).
+Команды проверяют HTTP-ответы. Проверка БД, файлов и ML-worker — [обучение на тестовом CSV](README.md#первое-обучение) после настройки HTTPS.
 
-Если сервис не запустился:
+Журналы сервисов:
 
 ```bash
 docker compose -f prod.docker-compose.yml logs --tail=100 db migrate backend ml-worker frontend
 ```
 
-## 4. Подключить Nginx и HTTPS
+## Nginx и HTTPS
 
-При первом развёртывании установите HTTP-конфигурацию:
+Первоначальная HTTP-конфигурация:
 
 ```bash
 sudo cp deploy/nginx/model-forge.conf /etc/nginx/conf.d/model-forge.conf
@@ -94,7 +99,7 @@ curl -fI http://model-forge.ru/
 curl -f http://model-forge.ru/api/health/
 ```
 
-Получите сертификат после успешной проверки HTTP:
+Выпуск сертификата после проверки HTTP:
 
 ```bash
 sudo dnf install -y certbot python3-certbot-nginx
@@ -103,26 +108,26 @@ sudo nginx -t
 sudo certbot renew --dry-run
 ```
 
-Certbot добавит TLS в установленную конфигурацию. **При обновлении приложения не копируйте HTTP-шаблон поверх работающей HTTPS-конфигурации.** Проверьте сертификаты командой `sudo certbot certificates` и настройку автоматического продления в systemd/cron.
+Certbot добавляет TLS в установленную конфигурацию Nginx. HTTP-шаблон из репозитория используется только при первоначальной настройке и не должен заменять действующую HTTPS-конфигурацию. Просмотр сертификатов: `sudo certbot certificates`. Автоматическое продление настраивается через systemd/cron.
 
-Откройте `https://model-forge.ru/` и `https://model-forge.ru/api/health/`. Если сайт не открывается из домашней LAN, проверьте через мобильный интернет: роутер может не поддерживать обращение из LAN к своему внешнему IP.
+Проверка: `https://model-forge.ru/` и `https://model-forge.ru/api/health/`. При отсутствии NAT loopback на роутере публичный адрес проверяется из внешней сети, например через мобильный интернет.
 
 ## Django Admin
 
-Для первого администратора:
+Создание суперпользователя:
 
 ```bash
 docker compose -f prod.docker-compose.yml exec backend python manage.py createsuperuser
 ```
 
-Панель доступна по `/admin/`. Обычная регистрация не даёт административных прав. Сейчас там зарегистрированы пользователи и группы Django; датасеты и эксперименты управляются через приложение и API.
+Панель доступна по `/admin/`. Зарегистрированы стандартные пользователи и группы Django. Датасеты и эксперименты управляются через приложение и API. Обычная регистрация не предоставляет административных прав.
 
 ## Данные, обновление и восстановление
 
 Production Compose использует volumes `model-forge-prod_postgres_data`, `model-forge-prod_media_data` и `model-forge-prod_static_data`. `docker compose down` сохраняет их, `down -v` удаляет.
 
-При обновлении через CI/CD создаётся дамп PostgreSQL в `/home/admin/model-forge-backups` и сохраняются предыдущие образы. Файлы CSV и моделей в дамп не входят: копируйте `media_data` отдельно, храните backup вне ВМ и проверяйте восстановление. Автоматического отката сейчас нет.
+При обновлении через CI/CD создаётся дамп PostgreSQL в `/home/admin/model-forge-backups` и сохраняются предыдущие образы. CSV и модели резервируются отдельно из `media_data`. Копии должны храниться вне ВМ и проходить проверку восстановления. Автоматический откат не реализован.
 
-Ручное обновление через `git pull --ff-only origin main` и `docker compose -f prod.docker-compose.yml up -d --build` не выполняет backup вместо вас. Используйте его только после отдельной резервной копии и проверки изменений.
+Перед ручным обновлением требуется резервная копия данных. Затем выполняются `git pull --ff-only origin main` и `docker compose -f prod.docker-compose.yml up -d --build`.
 
-В прежней схеме внешний Nginx PROD также направлял `dev.model-forge.ru` на отдельный DEV Compose-сервер. Такой маршрут нужно настраивать отдельно: шаблон `deploy/nginx/model-forge.conf` содержит только production-домены. DEV и PROD должны использовать разные `.env`, базы и volumes.
+Для Compose-стендов маршрут `dev.model-forge.ru` через внешний Nginx PROD настраивается отдельно: шаблон `deploy/nginx/model-forge.conf` содержит только production-домены. DEV и PROD используют разные `.env`, базы и volumes.

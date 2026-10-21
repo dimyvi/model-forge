@@ -1,164 +1,161 @@
-# Kubernetes: наш стенд и порядок изучения
+# Kubernetes
 
-[К документации проекта](README.md) · [Установка и проверка K3s](k3s-installation.md)
+[Документация проекта](README.md) · [Установка K3s](k3s-installation.md)
 
-Kubernetes запускает контейнеры на нескольких машинах и поддерживает описанное состояние приложения. K3s — дистрибутив Kubernetes, который мы выбрали для учебного стенда.
+Для DEV и PROD используются отдельные кластеры K3s. Миграция приложения с Docker Compose ещё не выполнена: Kubernetes-манифесты, публикация образов в registry и deploy в K3s не добавлены в репозиторий.
 
-## Что уже сделано
+## Состояние инфраструктуры
 
-По результатам ручной проверки 22 октября 2026 года:
+На 22 октября 2026 года установлена версия K3s `v1.37.1+k3s1`. В DEV зарегистрирована нода `dev-server`, в PROD — `prod-control`, `prod-worker1` и `prod-worker2`. Все четыре ноды прошли проверку `Ready`.
 
-- DEV: одна нода `dev-server` в состоянии `Ready`.
-- PROD: `prod-control`, `prod-worker1` и `prod-worker2` в состоянии `Ready`.
-- В выводе всех нод — K3s `v1.37.1+k3s1`.
+Межнодовая сеть, DNS, постоянное хранилище и развёртывание Model Forge требуют отдельной проверки. Мониторинг на INFRA и blue-green запланированы.
 
-Это подтверждает регистрацию и готовность нод на момент проверки. Проверка межнодовой сети, DNS, хранилища и самого приложения — следующие отдельные шаги.
+## Виртуальные машины
 
-Model Forge пока разворачивается через Docker Compose. В репозитории ещё нет Kubernetes-манифестов, Helm chart и CI/CD для K3s. Мониторинг на INFRA и blue-green ниже описаны как план.
+Ресурсы каждой ВМ: 2 vCPU, 4 ГБ RAM, диск 40 ГБ.
 
-## Наши пять ВМ
-
-Для каждой ВМ выделено 2 vCPU, 4 ГБ RAM и 40 ГБ диска.
-
-| ВМ | IP | Имя | Роль |
+| ВМ | IP | Hostname | Назначение |
 | --- | --- | --- | --- |
-| 1 | `192.168.1.218` | `infra` — плановое имя | Мониторинг; K3s для этой роли не требуется |
-| 2 | `192.168.1.193` | `dev-server` | Отдельный DEV-кластер: Server и запуск приложений на одной ВМ |
-| 3 | `192.168.1.226` | `prod-control` | Server PROD: управление кластером; по умолчанию также может запускать Pod |
-| 4 | `192.168.1.234` | `prod-worker1` | Agent PROD: запуск Pod |
-| 5 | `192.168.1.138` | `prod-worker2` | Agent PROD: запуск Pod |
+| 1 | `192.168.1.218` | `infra` — плановое имя | Grafana, Prometheus, Loki, Alertmanager; вне кластеров K3s |
+| 2 | `192.168.1.193` | `dev-server` | Однонодовый DEV-кластер: управление и запуск приложения |
+| 3 | `192.168.1.226` | `prod-control` | K3s Server, управляющая нода PROD |
+| 4 | `192.168.1.234` | `prod-worker1` | K3s Agent, worker-нода PROD |
+| 5 | `192.168.1.138` | `prod-worker2` | K3s Agent, worker-нода PROD |
 
-DEV — отдельный кластер на ВМ 2. PROD — один кластер из ВМ 3, 4 и 5. Blue и Green будут версиями приложения внутри PROD, а не новыми ВМ.
+PROD состоит из ВМ 3–5. DEV на ВМ 2 не подключается к PROD. Мониторинг на ВМ 1 не участвует в обработке пользовательских запросов; для его развёртывания планируется Docker Compose.
 
-На INFRA планируются Grafana, Prometheus, Loki и Alertmanager. Начать можно с Docker Compose. Отказ мониторинга не должен останавливать пользовательские запросы. Если все ВМ находятся на одном физическом сервере, отказ этого сервера затронет весь стенд.
+## Роли нод
 
-## Чем отличаются Server и Agent
+K3s Server включает control plane и компоненты запуска контейнеров. По умолчанию на Server разрешено размещение Pod. K3s Agent запускает назначенные ему Pod и не содержит control plane.
 
-В K3s Server включает управляющие и исполнительные компоненты. Agent включает исполнительные компоненты. Поэтому управляющая ВМ может выполнять приложения, а Agent без управляющих компонентов кластером не управляет. Подробнее: [архитектура K3s](https://docs.k3s.io/architecture).
-
-| Компонент | Для чего нужен | Где у нас |
+| Компонент | Назначение | Размещение |
 | --- | --- | --- |
-| API Server | Принимает запросы `kubectl` и компонентов кластера | ВМ 2 для DEV; ВМ 3 для PROD |
-| Scheduler | Выбирает ноду для ещё не назначенного Pod | Там же |
-| Controllers | Сравнивают желаемое состояние с фактическим и создают нужные объекты | Там же |
-| Datastore K3s | Хранит состояние кластера; при одиночном Server по умолчанию SQLite | Там же |
-| Kubelet | Следит за Pod, назначенными этой ноде | На всех нодах K3s |
-| Containerd | Скачивает образы и запускает контейнеры по запросу kubelet | На всех нодах K3s |
-| Сетевые компоненты | Связывают Pod и обеспечивают доступ через Service | На всех нодах K3s |
+| API Server | Приём запросов к API Kubernetes | DEV Server / PROD Server |
+| Scheduler | Выбор ноды для Pod | DEV Server / PROD Server |
+| Controllers | Поддержание заданного состояния ресурсов | DEV Server / PROD Server |
+| Datastore K3s | Состояние кластера; для одиночного Server по умолчанию SQLite | DEV Server / PROD Server |
+| Kubelet | Управление Pod на ноде | Server и Agent |
+| Containerd | Загрузка образов и запуск контейнеров | Server и Agent |
+| Сетевые компоненты | Связь Pod и доступ через Service | Server и Agent |
 
-Хранилище состояния K3s и PostgreSQL Model Forge — разные базы с разными задачами. Термины и устройство компонентов: [Kubernetes Components](https://kubernetes.io/docs/concepts/overview/components/).
+При создании Deployment controllers создают Pod, Scheduler назначает им ноды, а kubelet запускает контейнеры через containerd. Состояние K3s хранится отдельно от PostgreSQL приложения.
 
-При создании Deployment API Server принимает описание, controllers создают необходимые Pod, Scheduler назначает ноды, а kubelet через containerd запускает контейнеры. После запуска kubelet следит за ними. Controllers поддерживают число реплик; Scheduler выбирает место для новых Pod.
+Значение `<none>` в колонке `ROLES` у agents означает отсутствие метки роли. ML-worker приложения и worker-нода Kubernetes — разные сущности: первый выполняет обучение, вторая предоставляет ресурсы для Pod.
 
-В `kubectl get nodes` роль `<none>` у `prod-worker1` и `prod-worker2` нормальна: это отсутствие метки роли в выводе, а не ошибка подключения.
+Справочники: [K3s Architecture](https://docs.k3s.io/architecture), [Kubernetes Components](https://kubernetes.io/docs/concepts/overview/components/).
 
-### Как оставить PROD Server для управления
+### Ограничение размещения на PROD Server
 
-Статус `control-plane` сам по себе не запрещает запуск приложений. Для нашей схемы планируется taint `NoSchedule`. Сначала проверьте текущие ограничения и размещение:
+Для `prod-control` запланирован taint `NoSchedule`. Перед применением проверяются готовность обеих worker-нод и размещение системных Pod:
 
 ```bash
-# На ВМ 3
+# ВМ 3
 sudo /usr/local/bin/k3s kubectl describe node prod-control
 sudo /usr/local/bin/k3s kubectl get pods -A -o wide
 ```
 
-Когда обе worker-ноды готовы и размещение проверено, можно добавить ограничение:
+Установка taint:
 
 ```bash
 sudo /usr/local/bin/k3s kubectl taint nodes prod-control \
   node-role.kubernetes.io/control-plane=true:NoSchedule
 ```
 
-Оно не переселяет уже запущенные Pod и допускает Pod с подходящим toleration. Управляющая нода сохраняет kubelet и containerd. На единственном DEV Server такой taint пока не нужен. Документация: [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/).
+`NoSchedule` запрещает назначение новых Pod без подходящего toleration. Уже запущенные Pod остаются на ноде. Kubelet и containerd продолжают работать. На однонодовом DEV-кластере это ограничение не применяется.
 
-## Что читать по порядку
+Документация: [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/).
 
-Не нужно читать всю документацию сразу. Сначала пройдите первые четыре пункта и попробуйте небольшой Deployment в DEV.
+## Компоненты приложения
 
-| Порядок | Материал | Что нужно понять на примере Model Forge |
-| --- | --- | --- |
-| 1 | [Kubernetes Components](https://kubernetes.io/docs/concepts/overview/components/) и [K3s Architecture](https://docs.k3s.io/architecture) | Почему ВМ 3 управляет, а ВМ 4/5 исполняют |
-| 2 | [Pods](https://kubernetes.io/docs/concepts/workloads/pods/) и [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) | Pod — экземпляр запущенного приложения; Deployment поддерживает его реплики |
-| 3 | [Service](https://kubernetes.io/docs/concepts/services-networking/service/) | Как backend получает стабильный адрес при смене Pod |
-| 4 | [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) и [Traefik в K3s](https://docs.k3s.io/networking/networking-services#traefik-ingress-controller) | Как домен и путь запроса направляются в frontend или API |
-| 5 | [ConfigMap](https://kubernetes.io/docs/concepts/configuration/configmap/) и [Secret](https://kubernetes.io/docs/concepts/configuration/secret/) | Куда перенести настройки и пароли из `.env`; Secret требует защиты доступа |
-| 6 | [Persistent Volumes / PVC](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) и [хранилище K3s](https://docs.k3s.io/add-ons/storage) | Где будут жить PostgreSQL, датасеты и модели после пересоздания Pod |
-| 7 | [Requests и limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) и [probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) | Как выделять ресурсы и отличать запущенный контейнер от готового приложения |
-| 8 | [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/) | Как отдельно запускать миграции перед выпуском версии |
+План переноса сервисов Compose в Kubernetes:
 
-Для практики подойдёт [Learn Kubernetes Basics](https://kubernetes.io/docs/tutorials/kubernetes-basics/). Раздел создания кластера можно пропустить, если работающий K3s уже есть. Затем вернитесь к нашим [командам проверки](k3s-installation.md#проверка-кластеров).
-
-## Как части Model Forge будут выглядеть в Kubernetes
-
-Это план объектов, а не готовые манифесты:
-
-| Сейчас в Compose | План в Kubernetes |
+| Сервис / конфигурация | Ресурсы Kubernetes |
 | --- | --- |
-| `frontend` | Deployment с production-образом и Service |
-| `backend` | Deployment с Gunicorn и Service |
-| `ml-worker` | Отдельный Deployment из backend-образа с командой `python manage.py run_ml_worker`, сначала одна реплика |
-| `db` | PostgreSQL с постоянным томом; например, StatefulSet на одну реплику и Service |
-| `migrate` | Job для `migrate` и `collectstatic` с ожиданием его успешного завершения |
-| `.env` | ConfigMap для обычных настроек и Secret для паролей/ключей |
-| `media_data`, `static_data` | Постоянное хранилище, доступное нужным Pod |
-| Внешний Nginx | Ingress и Traefik с настроенным HTTPS |
+| `frontend` | Deployment с production-образом, Service |
+| `backend` | Deployment с Gunicorn, Service |
+| `ml-worker` | Deployment из backend-образа, команда `python manage.py run_ml_worker`, одна реплика |
+| `db` | PostgreSQL: StatefulSet на одну реплику, PVC и Service |
+| `migrate` | Job для `migrate` и `collectstatic`; завершение до выпуска приложения |
+| `.env` | ConfigMap с обычными настройками, Secret с паролями и ключами |
+| `media_data`, `static_data` | Постоянные тома с доступом из соответствующих Pod |
+| Внешний Nginx | Ingress и Traefik с HTTPS |
 
-Уже установленные по умолчанию компоненты K3s включают Traefik, CoreDNS и ServiceLB. Проверяйте их Pod перед установкой дополнительных копий: [Networking Services](https://docs.k3s.io/networking/networking-services).
+Traefik, CoreDNS и ServiceLB входят в стандартную установку K3s. Состав и состояние проверяются через `kubectl get pods -A`: [Networking Services](https://docs.k3s.io/networking/networking-services).
 
-План пользовательского маршрута:
+План маршрутизации:
 
 ```text
-Браузер → роутер:443 → настроенная точка входа Traefik
+Браузер → роутер:443 → Traefik
                          ├── /             → Service frontend → Pod frontend
                          └── /api/, /admin/ → Service backend  → Pod backend → PostgreSQL
 ```
 
-Traefik обрабатывает запросы по правилам Ingress. Control plane управляет этими объектами, а запросы к сайту не идут через API Server Kubernetes. Проброс роутера на конкретную ВМ остаётся отдельной точкой отказа, пока не настроен резервный вход.
+Правила задаются в Ingress. API Server Kubernetes управляет ресурсами и не обрабатывает запросы к сайту. Проброс роутера должен указывать на выбранную точку входа Traefik.
 
-## Данные и ограничения стенда
+## Ограничения
 
-Главная задача перед переносом — сохранить доступ к PostgreSQL и файлам приложения.
+### Хранилище
 
-**Media.** Backend сохраняет CSV, ML-worker читает его через `dataset.file.path`, а backend выдаёт готовую модель. Оба процесса должны видеть одни файлы. Встроенный `local-path` K3s создаёт том на конкретной ноде; такой диск автоматически на другую ВМ не переезжает. Для первого опыта можно разместить связанные Pod и локальный том на одном worker. Для распределения между worker-нодами потребуется общее файловое хранилище, например NFS с подходящим provisioner. Оба варианта требуют резервных копий.
+Backend и ML-worker должны иметь доступ к одним файлам в `media`. Worker читает датасет через `dataset.file.path`, backend сохраняет CSV и выдаёт готовые модели.
 
-**PostgreSQL.** Один экземпляр с PVC переживает пересоздание контейнера при доступном диске, но не даёт автоматический failover базы при отказе её ВМ. Нужны backup и пробное восстановление. Один StatefulSet не создаёт репликацию PostgreSQL.
+Встроенный provisioner `local-path` создаёт том на конкретной ноде. Такой том не переносится на другую ВМ при отказе. Начальный вариант — размещение связанных Pod на одном worker. Для распределения между нодами требуется общее файловое хранилище, например NFS с provisioner. MinIO потребует изменений в коде работы с файлами.
 
-**Django-статика.** Сейчас `collectstatic` пишет в volume, который читает frontend Nginx. В K3s надо обеспечить тот же доступ или отдельно изменить способ сборки и выдачи статики. Простой перенос frontend-образа не добавит в него Django-статику.
+`collectstatic` записывает Django-статику в том, который читает frontend Nginx. При переносе нужен общий доступ к этому тому либо изменение сборки и выдачи статики.
 
-**Ресурсы.** Начинайте с одной реплики ML-worker и небольших CSV. Requests и limits выбирайте по измерениям, оставляя память ОС и компонентам K3s. При обновлении одного worker-Deployment избегайте временного второго worker, если требуется строго одно обучение за раз. Для логов, метрик, образов и backup задайте лимиты хранения: диск ВМ всего 40 ГБ.
+PostgreSQL с одной репликой и PVC сохраняет данные при пересоздании Pod, пока доступен диск. StatefulSet не настраивает репликацию базы. Для PostgreSQL и media необходимы резервные копии и проверка восстановления.
 
-**Отказы.** У PROD один управляющий Server. При его отказе часть контейнеров на workers может продолжить работу, но кластер не сможет нормально создавать и перераспределять Pod. Две worker-ноды сами по себе не делают весь стенд отказоустойчивым.
+### Ресурсы
 
-MinIO, MLflow и Redis/Celery можно изучить позже. Они не требуются для первого переноса текущего приложения; переход на объектное хранилище потребует адаптации кода работы с файлами.
+Для первоначального развёртывания предусмотрена одна реплика ML-worker. Requests и limits определяются по потреблению на тестовых CSV с запасом для ОС и K3s. Если требуется строго одно обучение за раз, стратегия обновления worker должна исключать временный запуск второй реплики.
 
-## Как будет работать blue-green
+Диск ВМ ограничен 40 ГБ. Для образов, логов, метрик и резервных копий нужны ограничения хранения. Одновременный запуск Blue и Green требует дополнительного запаса памяти.
 
-Blue — текущая версия frontend/backend, Green — новая. Обе версии находятся в одном PROD-кластере и могут запускаться на любых разрешённых worker-нодах. Отдельная ВМ для каждого цвета не нужна.
+### Отказоустойчивость
 
-Для первого варианта удобно держать оба цвета в одном namespace, различая Pod метками `version: blue` и `version: green`. Стабильные Service выбирают активный цвет по selector. Обычный Service выбирает Pod в своём namespace, поэтому размещение цветов в разных namespaces потребует другой схемы маршрутизации. Принцип selectors описан в [Service](https://kubernetes.io/docs/concepts/services-networking/service/).
+PROD имеет один Server. При его отказе запущенные контейнеры на agents могут продолжить работу, но создание и перераспределение Pod недоступны. Локальные диски и проброс роутера на одну ВМ также остаются точками отказа. Если все ВМ размещены на одном физическом хосте, его отказ затронет весь стенд.
+
+## Blue-green
+
+Blue — рабочая версия frontend/backend, Green — версия кандидата на выпуск. Обе размещаются в одном PROD-кластере. Цвет не привязан к конкретной ВМ.
+
+Планируется один namespace с метками `version: blue` и `version: green`. Стабильные Service выбирают активную версию по selector. Service выбирает Pod в своём namespace: [Service](https://kubernetes.io/docs/concepts/services-networking/service/).
 
 Порядок выпуска:
 
-1. Запустить Green, оставив пользовательский трафик на Blue.
-2. Проверить Green по отдельному тестовому маршруту, включая обучение и скачивание.
-3. Переключить frontend и backend на Green согласованно. Два Service не переключаются одной атомарной операцией, поэтому краткий смешанный режим надо учитывать.
-4. Сохранить Blue для возврата до завершения проверки, затем освободить ресурсы.
+1. Развернуть Green без переключения пользовательского трафика.
+2. Проверить Green по отдельному маршруту: вход, загрузка CSV, обучение, скачивание модели.
+3. Переключить Service frontend и backend на Green.
+4. Сохранить Blue на время проверки после выпуска, затем удалить неактивную версию.
 
-База и media обычно общие для двух цветов внутри PROD. Миграции должны быть совместимы с обеими версиями: возврат трафика не отменяет изменения БД. На первом этапе оставляем один общий ML-worker и проверяем совместимость задач с обеими версиями API. Kubernetes сам не выполняет этот сценарий целиком: его нужно описать в deploy-процессе или выбрать подходящий инструмент.
+Переключение двух Service не атомарно. Frontend и backend должны допускать кратковременную работу разных версий. PostgreSQL и media остаются общими для цветов; миграции должны быть совместимы с обеими версиями. Переключение трафика обратно на Blue не отменяет изменения базы.
 
-## Порядок переноса Model Forge
+На первом этапе используется один общий ML-worker с форматом задач, совместимым с обеими версиями API. Автоматизация blue-green в CI/CD ещё не реализована.
 
-- [x] Установить отдельный DEV K3s и PROD K3s с двумя agents.
-- [ ] Проверить системные Pod, межнодовую сеть, DNS и правила firewall.
-- [ ] Проверить taint управляющей PROD-ноды и оставить её для управления.
-- [ ] Освоить Deployment и Service на небольшом приложении в DEV.
-- [ ] Выбрать хранение PostgreSQL, media и Django-статики; проверить backup/restore.
-- [ ] Подготовить образы с тегами версий и доступный нодам registry, например GHCR.
-- [ ] Добавить в репозиторий манифесты для DEV, миграций и компонентов Model Forge.
-- [ ] Проверить полный сценарий Model Forge в DEV через Ingress.
-- [ ] Подготовить PROD-манифесты, HTTPS и проверенный перенос данных с Compose.
-- [ ] Изменить CI/CD для публикации образов и deploy в нужный кластер.
-- [ ] Настроить мониторинг на INFRA.
-- [ ] Добавить blue-green и отработать возврат трафика.
+## План миграции
 
-Дополняйте этот список по мере выполнения. Готовность инфраструктуры и перенос приложения отмечаются отдельно, чтобы установка K3s не считалась завершённым развёртыванием Model Forge.
+- [x] Установить отдельные DEV- и PROD-кластеры K3s.
+- [ ] Проверить системные Pod, межнодовую сеть, DNS и firewall.
+- [ ] Ограничить размещение приложений на `prod-control`.
+- [ ] Определить хранилище PostgreSQL, media и Django-статики; проверить восстановление из backup.
+- [ ] Подготовить registry и образы с тегами версий.
+- [ ] Добавить манифесты DEV и Job миграций.
+- [ ] Проверить приложение в DEV через Ingress.
+- [ ] Подготовить PROD, HTTPS и перенос данных с Compose.
+- [ ] Перевести CI/CD на публикацию образов и deploy в K3s.
+- [ ] Развернуть мониторинг на INFRA.
+- [ ] Настроить blue-green и проверить откат трафика.
+
+## Материалы для изучения
+
+Рекомендуемый порядок:
+
+1. [Kubernetes Components](https://kubernetes.io/docs/concepts/overview/components/) и [K3s Architecture](https://docs.k3s.io/architecture) — компоненты кластера и роли нод.
+2. [Pods](https://kubernetes.io/docs/concepts/workloads/pods/) и [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) — запуск приложений, реплики и обновления.
+3. [Service](https://kubernetes.io/docs/concepts/services-networking/service/) — адресация и доступ к Pod.
+4. [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) и [Traefik в K3s](https://docs.k3s.io/networking/networking-services#traefik-ingress-controller) — маршрутизация HTTP/HTTPS.
+5. [ConfigMap](https://kubernetes.io/docs/concepts/configuration/configmap/) и [Secret](https://kubernetes.io/docs/concepts/configuration/secret/) — настройки, учётные данные и доступ к ним.
+6. [Persistent Volumes / PVC](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) и [хранилище K3s](https://docs.k3s.io/add-ons/storage) — постоянные данные и привязка томов к нодам.
+7. [Requests и limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) и [probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) — ресурсы и проверки состояния контейнеров.
+8. [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/) — однократные задачи, в том числе миграции.
+
+Практические упражнения: [Learn Kubernetes Basics](https://kubernetes.io/docs/tutorials/kubernetes-basics/). Команды для установленного стенда: [проверка кластеров](k3s-installation.md#проверка-кластеров).

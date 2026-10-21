@@ -1,121 +1,108 @@
 # Model Forge
 
-Model Forge — приложение для обучения моделей на CSV-данных. Пользователь загружает датасет, выбирает целевую колонку и алгоритмы, запускает эксперимент и скачивает готовую модель.
+Веб-приложение для обучения моделей на CSV-данных. Поддерживает классификацию и регрессию, сравнение алгоритмов и скачивание обученных моделей в формате `.joblib`.
 
-## С чего начать
+Стек: Django REST Framework, React, PostgreSQL и scikit-learn. Обучение выполняет отдельный ML-worker. Приложение разворачивается через Docker Compose; [миграция в K3s](kubernetes.md) находится в работе.
 
-| Задача | Инструкция |
+## Документация
+
+| Раздел | Содержание |
 | --- | --- |
-| Запустить приложение на компьютере | [Локальный запуск](#локальный-запуск) |
-| Пройти первый эксперимент | [Первое обучение](#первое-обучение) |
-| Изучить интерфейс и frontend | [Frontend](frontend.md) |
-| Проверить запросы в Postman | [API](api.md) |
-| Разобраться в обучении и ML-worker | [ML-движок](ml-engine.md) |
-| Развернуть приложение через Docker Compose | [Развёртывание Compose](production-deployment.md) |
-| Понять автоматические обновления | [CI/CD](ci-cd.md) |
-| Изучить Kubernetes и план переноса проекта | [Kubernetes](kubernetes.md) |
-| Повторить установку K3s или проверить ноды | [Установка и проверка K3s](k3s-installation.md) |
-
-В репозитории пока реализовано развёртывание через Docker Compose. По результатам ручной проверки 22 октября 2026 года отдельно подготовлены DEV- и PROD-кластеры K3s. Перенос Model Forge в них ещё предстоит: Kubernetes-манифестов и deploy в K3s в текущем CI/CD нет.
+| [Frontend](frontend.md) | Локальная разработка, структура, экраны приложения |
+| [API](api.md) | Авторизация, запросы, ответы и коллекция Postman |
+| [ML-движок](ml-engine.md) | Алгоритмы, очередь обучения, метрики и файлы моделей |
+| [Развёртывание Compose](production-deployment.md) | Настройка сервера, Nginx, HTTPS и хранение данных |
+| [CI/CD](ci-cd.md) | Проверки и обновление DEV/PROD через GitHub Actions |
+| [Kubernetes](kubernetes.md) | Инфраструктура, план миграции и материалы для изучения |
+| [Установка K3s](k3s-installation.md) | Подготовка нод, установка Server/Agent и диагностика |
 
 ## Локальный запуск
 
-Нужен Docker с плагином Compose. Node.js на компьютере нужен только при запуске frontend без контейнера.
+Требования: Docker и плагин Docker Compose. Для запуска frontend вне Docker дополнительно нужен Node.js.
 
-Все команды в этом разделе выполняются из корня проекта:
+Команды выполняются из корня репозитория:
 
 ```bash
 cd /home/dv/Documents/model-forge
-```
-
-Если `.env` ещё нет, создайте его из примера. Существующий файл не заменяйте:
-
-```bash
-cp .env.example .env
-```
-
-Запустите приложение:
-
-```bash
+test -f .env || cp .env.example .env
 docker compose -f local.docker-compose.yml up -d --build
 ```
 
-Compose запустит PostgreSQL, Django API, ML-worker и React. Django применит миграции автоматически.
+Compose запускает PostgreSQL, Django API, ML-worker и React. Миграции применяются при старте backend.
 
-| Что открыть | Адрес |
+| Сервис | Адрес |
 | --- | --- |
-| Приложение | `http://localhost:5173` |
+| Frontend | `http://localhost:5173` |
 | API | `http://localhost:8000/api/` |
-| Проверка HTTP-сервера | `http://localhost:8000/api/health/` |
+| Healthcheck | `http://localhost:8000/api/health/` |
 
-Если порт 8000 уже занят запущенным вручную Django, сначала остановите этот процесс. Отдельно запускать `npm run dev` при работающем frontend-контейнере не нужно.
+Порты 8000 и 5173 должны быть свободны. Frontend-контейнер уже запускает Vite и проксирует `/api` к backend.
 
-Основные команды:
+Состояние и логи:
 
 ```bash
-# Состояние контейнеров
 docker compose -f local.docker-compose.yml ps
-
-# Логи API и обучения; Ctrl+C завершает просмотр логов
 docker compose -f local.docker-compose.yml logs -f backend ml-worker
+```
 
-# Остановка с сохранением данных
+Остановка с сохранением данных:
+
+```bash
 docker compose -f local.docker-compose.yml down
 ```
 
-База хранится в Docker volume `postgres_data`. Датасеты находятся в `backend/media/datasets`, модели — в `backend/media/artifacts`. Команда `down -v` удаляет volumes, поэтому для обычной остановки она не нужна.
+PostgreSQL хранит данные в volume `postgres_data`, датасеты — в `backend/media/datasets`, модели — в `backend/media/artifacts`. Параметр `down -v` удаляет volumes.
 
 ## Первое обучение
 
-1. Откройте приложение и зарегистрируйтесь или войдите.
-2. Перейдите в «Новый эксперимент» и загрузите [classification.csv](examples/classification.csv).
-3. Выберите целевую колонку `completed`, алгоритмы Logistic Regression и Random Forest. Сохраните эксперимент.
-4. На странице эксперимента нажмите «Запустить обучение».
-5. Дождитесь перехода `ready → queued → running → completed`. При `failed` прочитайте сообщение об ошибке.
-6. Посмотрите метрики и скачайте модель `.joblib`.
+1. Зарегистрироваться или войти в приложение.
+2. В разделе «Новый эксперимент» загрузить [classification.csv](examples/classification.csv).
+3. Выбрать целевую колонку `completed` и алгоритмы Logistic Regression / Random Forest. Сохранить эксперимент.
+4. На странице эксперимента нажать «Запустить обучение».
+5. После завершения проверить метрики и скачать `.joblib`.
 
-Форма создания сейчас поддерживает классификацию. Регрессия доступна через [API](api.md#проверка-через-postman): используйте [regression.csv](examples/regression.csv), цель `price` и алгоритмы `linear_regression` / `random_forest`. Экран редактирования меняет целевую колонку и алгоритмы, но не тип задачи.
+Статусы обучения: `ready → queued → running → completed`. При ошибке устанавливается `failed`, причина доступна в `error_message`.
 
-Пока эксперимент находится в очереди или обучается, его и исходный датасет нельзя удалить. Неудачный эксперимент можно исправить и запустить снова. Для нового обучения после `completed` создайте новый эксперимент.
+Форма создания поддерживает классификацию. Для регрессии используется [API](api.md#проверка-через-postman): [regression.csv](examples/regression.csv), цель `price`, алгоритмы `linear_regression` / `random_forest`. Экран редактирования позволяет менять целевую колонку и алгоритмы без смены типа задачи.
 
-## Как устроено приложение
+Активный эксперимент и его датасет защищены от удаления. Эксперимент со статусом `failed` допускает исправление и повторный запуск. Повторное обучение после `completed` требует нового эксперимента.
+
+## Архитектура
 
 ```text
-Браузер с React → Django API → PostgreSQL: пользователи, эксперименты, очередь
-                                     ↑
-                                 ML-worker → отдельный процесс обучения
-                                     ↓
-                              модели и CSV в media
+React → Django API → PostgreSQL
+                        ↑
+                    ML-worker → процесс обучения
+                        ↓
+                  модели и CSV в media
 ```
 
-Django принимает запрос и сохраняет задачу. Отдельный ML-worker запускает обучение и записывает результат. **Worker Kubernetes** — это ВМ для запуска Pod, а **ML-worker** — процесс приложения для обучения моделей; это разные роли.
+API сохраняет задачу в PostgreSQL и возвращает `202 Accepted`. ML-worker забирает её из очереди, запускает обучение в отдельном процессе и сохраняет результат. Один экземпляр worker выполняет одну задачу за раз; несколько экземпляров могут обучать разные эксперименты параллельно.
 
-Один процесс `run_ml_worker` обрабатывает одну задачу за раз. Если запустить несколько таких процессов, они смогут обучать разные эксперименты параллельно. Для первого стенда оставляем один ML-worker. Redis и Celery в текущем коде не используются.
+Redis и Celery не используются. Backend и worker работают с общим каталогом `media`. Скачивание моделей доступно владельцу через API с авторизацией; маршрут `/media/` закрыт. Формат файлов и пример предсказания приведены в [документации ML-движка](ml-engine.md#содержимое-модели-и-предсказания).
 
-Файлы моделей скачиваются через API с токеном владельца. Публичного доступа к `/media/` нет. Содержимое `.joblib` и пример предсказания описаны в [ML-движке](ml-engine.md#содержимое-модели-и-предсказания).
+## Тесты
 
-## Проверки перед изменениями
-
-Из корня проекта запустите backend-тесты на PostgreSQL:
+Backend-тесты на PostgreSQL:
 
 ```bash
 docker compose -f local.docker-compose.yml run --build --rm backend python manage.py test
 ```
 
-Тестовая база создаётся отдельно; рабочие данные не очищаются. Для отчёта о покрытии:
+Для тестов создаётся отдельная база. Отчёт о покрытии:
 
 ```bash
 docker compose -f local.docker-compose.yml run --build --rm backend coverage run --rcfile=.coveragerc manage.py test --verbosity 2
 docker compose -f local.docker-compose.yml run --rm backend coverage report --rcfile=.coveragerc
 ```
 
-Coverage проверяет `users`, `datasets`, `experiments` и `ml_engine`; порог в конфигурации — 70%. Текущий CI запускает Django tests без проверки этого порога. Команды проверки frontend приведены в [его инструкции](frontend.md#команды-без-docker).
+Coverage учитывает `users`, `datasets`, `experiments` и `ml_engine`. Порог в `.coveragerc` — 70%; текущий CI запускает Django tests без проверки покрытия. Проверки frontend описаны в [отдельном разделе](frontend.md#разработка-без-docker).
 
-Проверить миграции:
+Проверка миграций:
 
 ```bash
 docker compose -f local.docker-compose.yml exec backend python manage.py showmigrations experiments
 docker compose -f local.docker-compose.yml exec backend python manage.py makemigrations --check --dry-run
 ```
 
-Локальный Compose использует сервер разработки Django. Для серверного запуска предназначены [production Compose](production-deployment.md) и будущий [перенос в K3s](kubernetes.md#порядок-переноса-model-forge).
+Локальный Compose использует сервер разработки Django. Серверное развёртывание описано в [production Compose](production-deployment.md).

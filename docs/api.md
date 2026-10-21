@@ -1,20 +1,20 @@
 # API Model Forge
 
-[К документации проекта](README.md)
+[Документация проекта](README.md)
 
-Локальный адрес API: `http://localhost:8000/api`. Все пути в таблице ниже добавляются к этому адресу. Сначала запустите приложение по [основной инструкции](README.md#локальный-запуск).
+Базовый адрес при локальном запуске: `http://localhost:8000/api`. Пути в таблицах указаны относительно него. Запуск сервисов описан в [README](README.md#локальный-запуск).
 
 ## Авторизация
 
-Для защищённых запросов нужен заголовок:
+Защищённые запросы используют Token Authentication:
 
 ```http
 Authorization: Token YOUR_LOGIN_TOKEN
 ```
 
-В Postman выберите **Authorization → API Key**, укажите ключ `Authorization`, значение `Token <token>` и добавление в Header. Используется префикс `Token`, а не `Bearer`. JSON отправляется через **Body → raw → JSON**, загрузка файлов — через **Body → form-data**. Заголовок multipart Postman установит самостоятельно.
+Настройка Postman: **Authorization → API Key**, ключ `Authorization`, значение `Token <token>`, расположение Header. Префикс — `Token`. JSON передаётся через **Body → raw → JSON**, файлы — через **Body → form-data** с автоматически сформированным multipart-заголовком.
 
-Импортируйте [коллекцию Model Forge](postman/Model%20Forge.postman_collection.json). Переменные коллекции сохраняют токен и идентификаторы датасета, эксперимента и результата. Укажите `username`, `password` и `email`, затем зарегистрируйтесь и войдите. Файл после импорта коллекции нужно выбрать на компьютере. Регистрация токен не возвращает — токен выдаётся при входе.
+[Коллекция Model Forge](postman/Model%20Forge.postman_collection.json) сохраняет токен и идентификаторы объектов в переменных. Перед запросами регистрации и входа заполняются `username`, `password` и `email`. Файл CSV выбирается после импорта коллекции. Токен выдаётся при входе; ответ регистрации его не содержит.
 
 ## Эндпоинты
 
@@ -33,21 +33,21 @@ Authorization: Token YOUR_LOGIN_TOKEN
 | POST | `/experiments/{id}/start/` | Постановка обучения в очередь, 202 |
 | GET | `/experiments/{id}/results/{result_id}/download/` | Скачивание своей модели, 200 binary |
 
-`/health/` возвращает `{"status":"ok"}`, но не проверяет PostgreSQL, хранилище и ML-worker. Для проверки всего приложения нужно пройти обучение тестового CSV.
+`/health/` возвращает `{"status":"ok"}` и проверяет только ответ HTTP-сервера. Проверка PostgreSQL, файлового хранилища и ML-worker выполняется полным сценарием обучения на тестовом CSV.
 
-В этой версии нет HTTP-эндпоинта для синхронного обучения, запуска загруженных моделей или предсказаний.
+Синхронное обучение, загрузка готовых моделей и предсказания через HTTP API не поддерживаются.
 
 ## Проверка через Postman
 
-Импортируйте коллекцию, выполните регистрацию и вход, затем пройдите последовательность ниже. Скриншоты пользовательского интерфейса находятся в [документации frontend](frontend.md#интерфейс-приложения).
+Сценарий для зарегистрированного пользователя:
 
-1. **Вход**: `POST /auth/login/` с телом `{"username":"your-user","password":"your-password"}`. Скопируйте `token` из ответа или используйте автоматическую переменную коллекции.
-2. **Загрузка CSV**: `POST /datasets/`, в form-data добавьте ключ **`file`** (нижний регистр), тип **File**, выберите `docs/examples/classification.csv`. Ожидается 201.
-3. **Просмотр**: `GET /datasets/{id}/` без тела. Ответ содержит колонки, число строк и первые десять строк.
-4. **Создание эксперимента**: `POST /experiments/` с JSON ниже. Ожидается 201, `status: "ready"` и пустой `results`.
-5. **Запуск**: `POST /experiments/{id}/start/` без тела. Ожидается 202 и `status: "queued"`. Это означает «принято», а не «завершено».
-6. **Результат**: повторяйте `GET /experiments/{id}/`. Worker переведёт эксперимент через `running` в `completed`. При `failed` смотрите `error_message`.
-7. **Скачивание**: отправьте GET на путь `model_file` результата с тем же токеном. В Postman используйте **Send and Download**, чтобы сохранить `.joblib`.
+1. Вход: `POST /auth/login/`, тело `{"username":"your-user","password":"your-password"}`. Коллекция сохраняет `token` из ответа.
+2. Загрузка CSV: `POST /datasets/`, form-data с ключом `file` типа File. Пример — `docs/examples/classification.csv`. Ответ: 201.
+3. Просмотр датасета: `GET /datasets/{id}/`. Ответ содержит колонки, число строк и первые десять строк.
+4. Создание эксперимента: `POST /experiments/` с JSON из примера ниже. Ответ: 201, `status: "ready"`, пустой `results`.
+5. Постановка в очередь: `POST /experiments/{id}/start/` без тела. Ответ: 202, `status: "queued"`.
+6. Получение статуса: `GET /experiments/{id}/`. Во время обучения статус — `running`, после завершения — `completed` или `failed`. Причина ошибки находится в `error_message`.
+7. Скачивание: GET по пути `model_file` с тем же токеном. В Postman команда **Send and Download** сохраняет файл `.joblib`.
 
 Для классификации:
 
@@ -60,7 +60,7 @@ Authorization: Token YOUR_LOGIN_TOKEN
 }
 ```
 
-Замените `dataset` на свой идентификатор. Для регрессии загрузите [regression.csv](examples/regression.csv) и используйте:
+Значение `dataset` — идентификатор загруженного датасета. Пример регрессии для [regression.csv](examples/regression.csv):
 
 ```json
 {
@@ -100,11 +100,11 @@ Authorization: Token YOUR_LOGIN_TOKEN
 }
 ```
 
-Для каждого выбранного алгоритма создаётся результат и файл модели. В JSON accuracy и F1 находятся в диапазоне от 0 до 1 и не являются процентами. Для классификации выигрывает максимальный F1 macro, для регрессии — минимальный MAE. Метрики считаются на общей validation-выборке, а не на независимом финальном тесте.
+Каждому алгоритму соответствует результат и файл модели. Accuracy и F1 передаются числами от 0 до 1. Критерий лучшей модели: максимальный F1 macro для классификации, минимальный MAE для регрессии. Метрики рассчитываются на общей validation-выборке; независимый финальный тест не выполняется.
 
 ## Статусы и ошибки
 
-| Статус | Что означает | Доступные действия |
+| Статус | Состояние | Доступные действия |
 | --- | --- | --- |
 | `ready` | Настройки сохранены | Изменить, удалить, запустить |
 | `queued` | Задача ждёт ML-worker | Смотреть статус |
@@ -116,7 +116,7 @@ Authorization: Token YOUR_LOGIN_TOKEN
 
 Датасет существующего эксперимента нельзя заменить через PATCH. Статус, результаты, даты и ошибки управляются сервером.
 
-Проверьте в Postman негативные сценарии:
+Ответы на некорректные запросы:
 
 | Сценарий | Ожидаемый ответ |
 | --- | --- |
@@ -133,10 +133,10 @@ Authorization: Token YOUR_LOGIN_TOKEN
 
 Если ML-worker остановлен, задача остаётся `queued` в PostgreSQL. По умолчанию обучение ограничено 300 секундами. Работающий worker помечает зависшие `running` как `failed` после этого таймаута с запасом 60 секунд; автоматического повторного запуска нет.
 
-## Как устроена реализация
+## Реализация
 
-Представления API проверяют владельца и передают задачу в сервисы приложения `experiments`. Очередь, таймауты и сохранение результатов разобраны в [описании ML-worker](ml-engine.md#как-работает-очередь).
+Представления API проверяют владельца и передают задачу в сервисы приложения `experiments`. Очередь, таймауты и сохранение результатов описаны в [ML-движке](ml-engine.md#очередь-обучения).
 
-Ссылка `model_file` — защищённый API-эндпоинт. React скачивает бинарный ответ через Axios с токеном и сохраняет Blob локально; обычная ссылка без авторизации не сработает.
+`model_file` указывает на защищённый API-эндпоинт. React получает бинарный ответ через Axios с токеном и сохраняет Blob на компьютере пользователя. Запрос без авторизации отклоняется.
 
-Полезные материалы: [блокировки строк Django](https://docs.djangoproject.com/en/6.0/ref/models/querysets/#select-for-update), [FileResponse Django](https://docs.djangoproject.com/en/6.0/ref/request-response/#fileresponse), [Token Authentication DRF](https://www.django-rest-framework.org/api-guide/authentication/#tokenauthentication).
+Справочники: [блокировки строк Django](https://docs.djangoproject.com/en/6.0/ref/models/querysets/#select-for-update), [FileResponse Django](https://docs.djangoproject.com/en/6.0/ref/request-response/#fileresponse), [Token Authentication DRF](https://www.django-rest-framework.org/api-guide/authentication/#tokenauthentication).

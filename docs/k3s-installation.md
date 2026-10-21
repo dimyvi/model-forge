@@ -1,80 +1,87 @@
-# Установка и проверка K3s
+# Установка K3s
 
-[К документации проекта](README.md) · [Архитектура и что читать](kubernetes.md)
+[Документация проекта](README.md) · [Инфраструктура Kubernetes](kubernetes.md)
 
-Инструкция для Rocky Linux 9 и нашего стенда из пяти ВМ. По ручной проверке 22 октября 2026 года DEV и все три PROD-ноды уже были `Ready`. На работающих нодах начните с [проверки](#проверка-кластеров); повторная установка для проверки не нужна.
+ОС: Rocky Linux 9. Версия стенда: K3s `v1.37.1+k3s1`.
 
-Основа: [Requirements](https://docs.k3s.io/installation/requirements), [Quick Start](https://docs.k3s.io/quick-start), [Configuration Options](https://docs.k3s.io/installation/configuration).
+Процедура предназначена для первоначальной установки. Состав и статус существующих нод приведены в [описании инфраструктуры](kubernetes.md#виртуальные-машины). Для работающего кластера используется раздел [проверки](#проверка-кластеров).
 
-## 1. Подготовить ВМ
+Официальные инструкции: [Requirements](https://docs.k3s.io/installation/requirements), [Quick Start](https://docs.k3s.io/quick-start), [Configuration Options](https://docs.k3s.io/installation/configuration).
 
-У каждой ноды должно быть уникальное hostname. Проверить его можно командой `hostnamectl`. Менять имя лучше до установки K3s; если нода уже зарегистрирована, не переименовывайте её в рамках обычной проверки.
+## Подготовка
 
-| ВМ | IP | Имя Linux | Установка |
-| --- | --- | --- | --- |
-| 1 | `192.168.1.218` | `infra` | K3s не требуется |
-| 2 | `192.168.1.193` | `dev-server` | Server отдельного DEV-кластера |
-| 3 | `192.168.1.226` | `prod-control` | Server PROD-кластера |
-| 4 | `192.168.1.234` | `prod-worker1` | Agent PROD |
-| 5 | `192.168.1.138` | `prod-worker2` | Agent PROD |
+Ansible подготавливает ОС, пользователя `admin`, SSH и firewall. K3s использует встроенный containerd; отдельная установка Docker на ноды не требуется.
 
-Например, до первой установки на ВМ 4:
+Hostname задаётся до установки K3s и должен быть уникальным. Пример для ВМ 4:
 
 ```bash
 sudo hostnamectl set-hostname prod-worker1
+hostnamectl
 ```
 
-Перезагрузка только ради изменения hostname обычно не нужна. SSH-подключение используйте уже настроенное: например, `ssh vm3-prod-control`, либо `ssh -p 8228 admin@192.168.1.226`, если после подготовки SSH работает на порту 8228.
+Остальные имена указаны в [таблице ВМ](kubernetes.md#виртуальные-машины). Переименование зарегистрированной ноды не входит в эту процедуру.
 
-Ansible подготавливает пользователя, SSH, ОС и firewall. K3s включает собственный containerd; отдельно ставить Docker для Kubernetes не требуется. Требования ОС проверяйте по [Requirements](https://docs.k3s.io/installation/requirements#operating-systems).
+Подключение по настроенному SSH alias:
+
+```bash
+ssh vm3-prod-control
+```
+
+При подключении по IP указывается настроенный порт, например `ssh -p 8228 admin@192.168.1.226`.
 
 ### Сеть и firewall
 
-Для нашего PROD с обычным Flannel VXLAN:
+Для PROD с Flannel VXLAN используются следующие правила:
 
-| Назначение | Куда разрешить | Откуда |
-| --- | --- | --- |
-| TCP 6443: API и регистрация | ВМ 3 | ВМ 4/5 и доверенный компьютер администратора |
-| UDP 8472: межнодовая сеть | ВМ 3/4/5 | Только другие ноды этого PROD-кластера |
-| TCP 10250: kubelet/метрики | ВМ 3/4/5 | Другие ноды этого PROD-кластера |
+| Порт | Назначение | Получатель | Источник |
+| --- | --- | --- | --- |
+| TCP 6443 | API и регистрация agents | ВМ 3 | ВМ 4/5, компьютер администратора |
+| UDP 8472 | Межнодовая сеть | ВМ 3/4/5 | Другие ноды PROD |
+| TCP 10250 | Kubelet и метрики | ВМ 3/4/5 | Другие ноды PROD |
 
-DEV имеет отдельные правила для своего Server и административного доступа. Не открывайте UDP 8472 в интернет. Для firewalld также нужно учесть трафик Pod и Service: по умолчанию используются `10.42.0.0/16` и `10.43.0.0/16`. Трёх правил портов недостаточно для любой конфигурации firewall. Официальные разделы: [Firewalld](https://docs.k3s.io/installation/requirements#operating-systems) и [Networking / Inbound Rules](https://docs.k3s.io/installation/requirements#networking).
+UDP 8472 доступен только внутри кластера. DEV использует отдельные правила доступа к своему Server.
 
-Настройку доступа к сайту на 80/443 выполняйте отдельно после выбора точки входа Traefik. Если сохраняете firewalld, проверьте не только `Ready` нод, но и связь Pod между workers.
+В firewalld также учитывается трафик Pod и Service: стандартные сети K3s — `10.42.0.0/16` и `10.43.0.0/16`. Правила должны разрешать связь Pod между worker-нодами. Полный список требований: [настройки ОС](https://docs.k3s.io/installation/requirements#operating-systems), [Networking / Inbound Rules](https://docs.k3s.io/installation/requirements#networking).
 
-## 2. Установить DEV Server
+Доступ на 80/443 настраивается после выбора точки входа Traefik.
 
-Только на ВМ 2, при первой установке:
+## DEV Server
+
+Установка на ВМ 2 (`192.168.1.193`):
 
 ```bash
 curl -4 -sfL https://get.k3s.io | \
 sudo env INSTALL_K3S_VERSION="v1.37.1+k3s1" sh -s - server
 ```
 
-Это версия, установленная на нашем стенде; это не рекомендация обновляться до неё без проверки. Явный `INSTALL_K3S_VERSION` позволяет не обращаться к `update.k3s.io` для определения версии. Загрузка установщика и файлов с GitHub всё равно требует сети. Документация: [Configuration Options](https://docs.k3s.io/installation/configuration).
+`INSTALL_K3S_VERSION` фиксирует версию и исключает запрос к `update.k3s.io` для её определения. Установщик и release assets загружаются из сети: [Configuration Options](https://docs.k3s.io/installation/configuration).
+
+Проверка:
 
 ```bash
 sudo systemctl is-active k3s
 sudo /usr/local/bin/k3s kubectl get nodes -o wide
 ```
 
-Ожидается `active` и одна нода `dev-server` со статусом `Ready`. Она и управляет DEV, и запускает его приложения.
+Ожидаемый результат: служба `active`, нода `dev-server` в состоянии `Ready`. На ней работают control plane и приложения DEV.
 
-## 3. Установить PROD Server
+## PROD Server
 
-Только на ВМ 3 выполните ту же команду установки Server из предыдущего шага. Она создаст отдельный PROD-кластер.
+На ВМ 3 (`192.168.1.226`) выполняется та же команда установки Server. Создаётся отдельный PROD-кластер.
 
-Получите токен на ВМ 3:
+Токен подключения agents:
 
 ```bash
 sudo cat /var/lib/rancher/k3s/server/node-token
 ```
 
-Он понадобится только для подключения PROD agents. Скопируйте полную строку без изменения. Токен DEV здесь не подходит. Не отправляйте токен в чат и не сохраняйте в Git. Для уже раскрытого токена запланируйте замену по [документации токенов K3s](https://docs.k3s.io/cli/token).
+Токен передаётся полностью, включая префикс и хеш CA. Для PROD используется токен его Server. Токены хранятся вне репозитория; порядок замены описан в [K3s Token](https://docs.k3s.io/cli/token).
 
-## 4. Подключить PROD workers
+## PROD Agents
 
-На ВМ 4 и затем отдельно на ВМ 5 используйте следующую команду. Она явно устанавливает **Agent**, который подключается к ВМ 3. Сначала введите полный актуальный токен PROD через скрытый ввод Bash:
+Процедура выполняется отдельно на ВМ 4 (`192.168.1.234`) и ВМ 5 (`192.168.1.138`). На них устанавливается только Agent.
+
+Ввод токена PROD и установка:
 
 ```bash
 read -rsp 'Токен PROD: ' PROD_K3S_TOKEN
@@ -90,27 +97,28 @@ sh -s - agent
 unset PROD_K3S_TOKEN
 ```
 
-Токен не записывается как литерал в историю команд; установщик сохраняет нужные настройки службы на ноде. Перед выполнением agent-команды на worker не нужно устанавливать Server. Параметры подключения: [Quick Start](https://docs.k3s.io/quick-start).
+Скрытый ввод не сохраняет значение токена в истории команд. Установщик записывает параметры подключения в конфигурацию службы. Описание параметров: [Quick Start](https://docs.k3s.io/quick-start).
 
-Проверка на каждой worker-ВМ:
+Проверка на каждой worker-ноде:
 
 ```bash
 sudo systemctl is-active k3s-agent
 sudo journalctl -u k3s-agent -n 30 --no-pager
 ```
 
-Ожидается `active`. `activating` означает, что запуск ещё не завершился; причину ожидания смотрите в журнале.
+Ожидаемое состояние — `active`. Причина незавершённого запуска (`activating`) выводится в журнале службы.
 
 ## Проверка кластеров
 
-На ВМ 2 команды показывают только DEV:
+На Server нужного кластера — ВМ 2 для DEV или ВМ 3 для PROD:
 
 ```bash
 sudo /usr/local/bin/k3s kubectl get nodes -o wide
 sudo /usr/local/bin/k3s kubectl get pods -A -o wide
+sudo /usr/local/bin/k3s kubectl get events -A --sort-by=.metadata.creationTimestamp
 ```
 
-На ВМ 3 те же команды показывают PROD. В списке нод должны быть:
+Ожидаемый список PROD:
 
 ```text
 prod-control   Ready   control-plane
@@ -118,25 +126,25 @@ prod-worker1   Ready   <none>
 prod-worker2   Ready   <none>
 ```
 
-Системные Pod должны быть `Running`/готовы; завершённые установочные Jobs могут иметь статус `Completed`. События кластера:
+В DEV отображается только `dev-server`. Системные Pod должны быть готовы и иметь статус `Running`; завершённые установочные Jobs — `Completed`.
+
+Подробности ноды и Pod:
 
 ```bash
-sudo /usr/local/bin/k3s kubectl get events -A --sort-by=.metadata.creationTimestamp
+sudo /usr/local/bin/k3s kubectl describe node prod-worker1
 ```
 
-Для ноды с ошибкой используйте `kubectl describe node <имя>`, для Pod — `kubectl describe pod <имя> -n <namespace>` и `kubectl logs <имя> -n <namespace>`. Эти команды дописываются после `sudo /usr/local/bin/k3s`.
+Для Pod используются `kubectl describe pod <имя> -n <namespace>` и `kubectl logs <имя> -n <namespace>` с тем же префиксом `sudo /usr/local/bin/k3s`.
 
-## Kubectl без sudo на Server
+## Доступ через kubectl
 
-Разовая команда с полным путём работает даже тогда, когда `sudo` не находит `k3s` в PATH:
+Системный kubeconfig находится в `/etc/rancher/k3s/k3s.yaml`. Команда с sudo использует его напрямую:
 
 ```bash
 sudo /usr/local/bin/k3s kubectl get nodes
 ```
 
-Для повседневной работы от `admin` на ВМ 2 или ВМ 3 можно использовать личную копию kubeconfig. Если `~/.kube/config` уже существует, сохраните его и сначала разберитесь, к какому кластеру он относится.
-
-При отсутствии личного kubeconfig:
+Для работы от `admin` на Server доступна личная копия kubeconfig. Следующие команды предназначены для случая, когда `~/.kube/config` ещё не создан; существующий файл сохраняется отдельно перед заменой.
 
 ```bash
 mkdir -p "$HOME/.kube"
@@ -147,22 +155,22 @@ export KUBECONFIG="$HOME/.kube/config"
 /usr/local/bin/kubectl get nodes
 ```
 
-Чтобы сохранить выбор файла после входа, добавьте один раз в `~/.bashrc` строку `export KUBECONFIG="$HOME/.kube/config"`. Это нужно явно указать для kubectl, который поставляется с K3s: по умолчанию он читает системный файл. Ошибка `permission denied` не доказывает, что переменная уже была задана.
+Для последующих сеансов в `~/.bashrc` добавляется строка `export KUBECONFIG="$HOME/.kube/config"`. Kubectl из поставки K3s по умолчанию читает системный файл, поэтому путь к личной копии задаётся явно.
 
-В пользовательском PATH у нас `/usr/local/bin` уже доступен. Менять `sudo PATH` или создавать ссылку в `/usr/bin` для этих команд не требуется. Копия kubeconfig даёт административные права; права `600` сохраняйте. K3s обновляет сертификаты в системном kubeconfig, а личные копии нужно обновлять отдельно: [Cluster Access](https://docs.k3s.io/cluster-access).
+Kubeconfig предоставляет административный доступ; права файла — `600`. K3s обновляет сертификаты в системном файле, личные копии обновляются отдельно: [Cluster Access](https://docs.k3s.io/cluster-access).
 
-## Если установка или запуск не проходят
+## Диагностика
 
-| Сообщение | Что проверить |
+| Ошибка | Проверка |
 | --- | --- |
-| Сброс соединения с `update.k3s.io` | Использовать конкретный `INSTALL_K3S_VERSION`; отдельно проверить доступ к GitHub и release assets |
-| `sudo: k3s: command not found` | Запустить `/usr/local/bin/k3s` полным путём |
-| Нет прав на `/etc/rancher/k3s/k3s.yaml` | Использовать sudo или явно указать личный `KUBECONFIG` |
-| `127.0.0.1:6444: address already in use` | Найти процесс через `sudo ss -ltnp`; проверить, не запущен ли Server вместе с Agent |
-| `not authorized` | Проверить полный актуальный токен именно PROD и настройки Agent; если токен верен — журнал Server и регистрацию ноды |
-| Ожидание на `Starting k3s-agent` | В другом SSH-сеансе посмотреть состояние службы и журнал |
+| Сброс соединения с `update.k3s.io` | Фиксация `INSTALL_K3S_VERSION`, доступ к GitHub и release assets |
+| `sudo: k3s: command not found` | Полный путь `/usr/local/bin/k3s` вместо имени команды |
+| Нет прав на `/etc/rancher/k3s/k3s.yaml` | Sudo или личный kubeconfig с явно заданным `KUBECONFIG` |
+| `127.0.0.1:6444: address already in use` | Процесс, занявший порт; одновременный запуск Server и Agent |
+| `not authorized` | Полный токен PROD, параметры Agent, журнал Server и регистрация ноды |
+| Ожидание на `Starting k3s-agent` | Статус и журнал службы в другом SSH-сеансе |
 
-Команды на worker с проблемой:
+Команды на worker-ноде:
 
 ```bash
 sudo systemctl status k3s-agent --no-pager -l
@@ -171,6 +179,4 @@ sudo systemctl status k3s --no-pager -l
 sudo ss -ltnp
 ```
 
-Наличие `k3s.service` на worker может означать случайную установку Server. Перед удалением выясните, какие данные он хранит. Скрипт uninstall удаляет локальные данные K3s и не является обычной командой диагностики. Порядок и последствия описаны в [Uninstalling K3s](https://docs.k3s.io/installation/uninstall).
-
-После проверки инфраструктуры продолжайте по [плану переноса Model Forge](kubernetes.md#порядок-переноса-model-forge). Устанавливать Redis, Celery, MinIO или второй Traefik для проверки нод не требуется.
+Наличие `k3s.service` на worker может указывать на ошибочную установку Server. Перед его удалением требуется проверить локальные данные. Скрипт uninstall удаляет данные K3s: [Uninstalling K3s](https://docs.k3s.io/installation/uninstall).

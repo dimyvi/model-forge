@@ -1,175 +1,121 @@
 # Model Forge
 
-Основные инструкции:
+Model Forge — приложение для обучения моделей на CSV-данных. Пользователь загружает датасет, выбирает целевую колонку и алгоритмы, запускает эксперимент и скачивает готовую модель.
 
-- [развёртывание на PROD](production-deployment.md);
-- [автоматические тесты и обновление DEV/PROD](ci-cd.md);
-- локальная разработка описана ниже.
+## С чего начать
+
+| Задача | Инструкция |
+| --- | --- |
+| Запустить приложение на компьютере | [Локальный запуск](#локальный-запуск) |
+| Пройти первый эксперимент | [Первое обучение](#первое-обучение) |
+| Изучить интерфейс и frontend | [Frontend](frontend.md) |
+| Проверить запросы в Postman | [API](api.md) |
+| Разобраться в обучении и ML-worker | [ML-движок](ml-engine.md) |
+| Развернуть приложение через Docker Compose | [Развёртывание Compose](production-deployment.md) |
+| Понять автоматические обновления | [CI/CD](ci-cd.md) |
+| Изучить Kubernetes и план переноса проекта | [Kubernetes](kubernetes.md) |
+| Повторить установку K3s или проверить ноды | [Установка и проверка K3s](k3s-installation.md) |
+
+В репозитории пока реализовано развёртывание через Docker Compose. По результатам ручной проверки 22 октября 2026 года отдельно подготовлены DEV- и PROD-кластеры K3s. Перенос Model Forge в них ещё предстоит: Kubernetes-манифестов и deploy в K3s в текущем CI/CD нет.
 
 ## Локальный запуск
 
-Нужны Docker Compose и Node.js. Все команды ниже выполняются из корня проекта `/home/dv/Documents/model-forge`, даже если этот README открыт в папке `docs`.
+Нужен Docker с плагином Compose. Node.js на компьютере нужен только при запуске frontend без контейнера.
 
-1. Если `.env` ещё нет, создайте локальный файл настроек из примера. Существующий `.env` сохраняйте:
+Все команды в этом разделе выполняются из корня проекта:
 
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Из корня проекта одной командой запустите PostgreSQL, Django, ML-worker и React:
-
-   ```bash
-   docker compose -f local.docker-compose.yml up -d --build
-   ```
-
-   Django сам применит миграции. Worker и frontend запустятся после готовности API. API будет доступно на `http://localhost:8000`, React — на `http://localhost:5173`.
-
-   Посмотреть состояние и логи:
-
-   ```bash
-   docker compose -f local.docker-compose.yml ps
-   docker compose -f local.docker-compose.yml logs -f backend ml-worker
-   ```
-
-Если Django уже запущен вручную на порту `8000`, остановите его перед запуском Compose, чтобы освободить порт.
-
-В режиме Compose frontend проксирует запросы `/api` к сервису `backend` внутри Docker-сети. Поэтому отдельный запуск `npm run dev` не нужен. Если frontend нужен без Docker, его по-прежнему можно запустить из папки `frontend` командами `npm ci` и `npm run dev`.
-
-PostgreSQL хранит данные в Docker volume `postgres_data`, файлы датасетов — в `backend/media/datasets`, модели — в `backend/media/artifacts`. Для остановки используйте `docker compose -f local.docker-compose.yml down`: данные сохраняются. Для очереди и нескольких workers используйте PostgreSQL; SQLite оставлен для простых локальных проверок.
-
-## Базовые Docker-образы
-
-Для проекта не используются Alpine-образы для всех сервисов подряд. Выбор образа зависит от стека:
-
-| Сервис | Образ | Причина |
-| --- | --- | --- |
-| Django и ML-worker | `python:3.12-slim` | Хорошая совместимость с `numpy`, `pandas`, `scikit-learn`, `scipy` и готовыми Python wheel-пакетами |
-| React/Vite | `node:20-alpine` | Frontend не содержит тяжёлых Python-зависимостей, поэтому Alpine подходит |
-| PostgreSQL | `postgres:16-alpine` | Официальный компактный образ базы данных |
-| Nginx | `nginx:alpine` | Компактный образ для раздачи frontend и reverse proxy |
-
-Backend намеренно использует `python:3.12-slim`, а не Alpine. Alpine основан на `musl libc`, из-за чего ML-библиотеки могут собираться из исходников и давать проблемы совместимости. Для Python ML-сервиса Debian Slim надёжнее. Файлы сборки называются `local.Dockerfile` во всех сервисах, где используется локальная Docker-сборка.
-
-## Как пользоваться обучением
-
-1. Откройте React, зарегистрируйтесь или войдите.
-2. В разделе «Новый эксперимент» загрузите CSV или выберите свой датасет. Для первого запуска подойдёт [classification.csv](examples/classification.csv).
-3. Выберите целевую колонку `completed` и алгоритмы Logistic Regression / Random Forest. Сохраните эксперимент.
-4. На странице эксперимента нажмите «Запустить обучение».
-5. Статус будет обновляться автоматически: `ready → queued → running → completed` или `failed`.
-6. На этой же странице появятся метрики, отметка лучшей модели и кнопки скачивания `.joblib`.
-
-Текущий экран создания эксперимента настраивает классификацию. Регрессия также поддерживается движком и API: пример [regression.csv](examples/regression.csv), цель `price`, алгоритмы `linear_regression` / `random_forest`. На странице редактирования можно изменить задачу и алгоритмы.
-
-Эксперимент со статусом `failed` можно исправить или запустить повторно. Для нового запуска завершённого эксперимента создайте новую конфигурацию. Во время ожидания/обучения настройки, эксперимент и его датасет защищены от изменения и удаления. При удалении завершённого эксперимента удаляются и его модели; удаление датасета удаляет связанные эксперименты и их модели.
-
-Подробные запросы, ответы и действия в Postman: [API](api.md). Готовая коллекция: [Model Forge.postman_collection.json](postman/Model%20Forge.postman_collection.json).
-
-## Интерфейс приложения
-
-Основной пользовательский сценарий выглядит так: вход в систему → обзор проекта → работа с датасетами → создание эксперимента → просмотр результата обучения.
-
-### Вход
-
-![Страница входа в Model Forge](screenshots/01-login.png)
-*Рисунок 1 — страница входа в Model Forge.*
-
-### Главная страница
-
-![Главная страница Model Forge](screenshots/02-dashboard.png)
-*Рисунок 2 — обзорная страница пользователя со статистикой и быстрым доступом к разделам.*
-
-### Датасеты
-
-![Раздел датасетов](screenshots/03-datasets.png)
-*Рисунок 3 — список загруженных датасетов и просмотр их содержимого.*
-
-### Эксперименты
-
-![Раздел экспериментов](screenshots/04-experiments.png)
-*Рисунок 4 — список экспериментов и их текущие статусы.*
-
-### Результат эксперимента
-
-![Результат эксперимента](screenshots/05-result_experiment.png)
-*Рисунок 5 — метрики обученных моделей и возможность скачать лучший результат.*
-
-## Где находятся модели и что внутри
-
-```text
-backend/media/artifacts/user_<id>/experiment_<id>/<run_uuid>/<algorithm>.joblib
+```bash
+cd /home/dv/Documents/model-forge
 ```
 
-Файл содержит обученный Pipeline: подготовку признаков, сам алгоритм и метаданные. Метрики и ссылка на файл хранятся в PostgreSQL. Скачивание требует токен владельца; публичного доступа через `/media/` нет. Папка `media/` не попадает в Git.
+Если `.env` ещё нет, создайте его из примера. Существующий файл не заменяйте:
 
-Для использования скачанной модели нужны зависимости из `backend/local.requirements.txt` и пакет `ml_engine` из этого проекта. Пример предсказаний и ограничения совместимости — в [документации ML-модуля](ml-engine.md#содержимое-модели-и-предсказания).
+```bash
+cp .env.example .env
+```
 
-## Тесты
+Запустите приложение:
 
-Тесты лежат рядом с Django-приложениями: например, `backend/users/tests/` и `backend/datasets/tests/`. Это удобно: тесты конкретного приложения находятся рядом с его кодом.
+```bash
+docker compose -f local.docker-compose.yml up -d --build
+```
 
-Запустить весь набор на PostgreSQL можно из корня проекта:
+Compose запустит PostgreSQL, Django API, ML-worker и React. Django применит миграции автоматически.
+
+| Что открыть | Адрес |
+| --- | --- |
+| Приложение | `http://localhost:5173` |
+| API | `http://localhost:8000/api/` |
+| Проверка HTTP-сервера | `http://localhost:8000/api/health/` |
+
+Если порт 8000 уже занят запущенным вручную Django, сначала остановите этот процесс. Отдельно запускать `npm run dev` при работающем frontend-контейнере не нужно.
+
+Основные команды:
+
+```bash
+# Состояние контейнеров
+docker compose -f local.docker-compose.yml ps
+
+# Логи API и обучения; Ctrl+C завершает просмотр логов
+docker compose -f local.docker-compose.yml logs -f backend ml-worker
+
+# Остановка с сохранением данных
+docker compose -f local.docker-compose.yml down
+```
+
+База хранится в Docker volume `postgres_data`. Датасеты находятся в `backend/media/datasets`, модели — в `backend/media/artifacts`. Команда `down -v` удаляет volumes, поэтому для обычной остановки она не нужна.
+
+## Первое обучение
+
+1. Откройте приложение и зарегистрируйтесь или войдите.
+2. Перейдите в «Новый эксперимент» и загрузите [classification.csv](examples/classification.csv).
+3. Выберите целевую колонку `completed`, алгоритмы Logistic Regression и Random Forest. Сохраните эксперимент.
+4. На странице эксперимента нажмите «Запустить обучение».
+5. Дождитесь перехода `ready → queued → running → completed`. При `failed` прочитайте сообщение об ошибке.
+6. Посмотрите метрики и скачайте модель `.joblib`.
+
+Форма создания сейчас поддерживает классификацию. Регрессия доступна через [API](api.md#проверка-через-postman): используйте [regression.csv](examples/regression.csv), цель `price` и алгоритмы `linear_regression` / `random_forest`. Экран редактирования меняет целевую колонку и алгоритмы, но не тип задачи.
+
+Пока эксперимент находится в очереди или обучается, его и исходный датасет нельзя удалить. Неудачный эксперимент можно исправить и запустить снова. Для нового обучения после `completed` создайте новый эксперимент.
+
+## Как устроено приложение
+
+```text
+Браузер с React → Django API → PostgreSQL: пользователи, эксперименты, очередь
+                                     ↑
+                                 ML-worker → отдельный процесс обучения
+                                     ↓
+                              модели и CSV в media
+```
+
+Django принимает запрос и сохраняет задачу. Отдельный ML-worker запускает обучение и записывает результат. **Worker Kubernetes** — это ВМ для запуска Pod, а **ML-worker** — процесс приложения для обучения моделей; это разные роли.
+
+Один процесс `run_ml_worker` обрабатывает одну задачу за раз. Если запустить несколько таких процессов, они смогут обучать разные эксперименты параллельно. Для первого стенда оставляем один ML-worker. Redis и Celery в текущем коде не используются.
+
+Файлы моделей скачиваются через API с токеном владельца. Публичного доступа к `/media/` нет. Содержимое `.joblib` и пример предсказания описаны в [ML-движке](ml-engine.md#содержимое-модели-и-предсказания).
+
+## Проверки перед изменениями
+
+Из корня проекта запустите backend-тесты на PostgreSQL:
 
 ```bash
 docker compose -f local.docker-compose.yml run --build --rm backend python manage.py test
 ```
 
-Тестовая база создаётся отдельно и удаляется после завершения; рабочие данные не очищаются.
-
-Чтобы запустить тесты с Coverage и вывести отчёт, выполни из корня проекта:
+Тестовая база создаётся отдельно; рабочие данные не очищаются. Для отчёта о покрытии:
 
 ```bash
 docker compose -f local.docker-compose.yml run --build --rm backend coverage run --rcfile=.coveragerc manage.py test --verbosity 2
 docker compose -f local.docker-compose.yml run --rm backend coverage report --rcfile=.coveragerc
 ```
 
-Coverage считает покрытие `users`, `datasets`, `experiments` и `ml_engine`; миграции и сами тесты в отчёт не входят. Отчёт показывает общий процент, а также непокрытые строки. Настроенный минимальный порог — 70%.
+Coverage проверяет `users`, `datasets`, `experiments` и `ml_engine`; порог в конфигурации — 70%. Текущий CI запускает Django tests без проверки этого порога. Команды проверки frontend приведены в [его инструкции](frontend.md#команды-без-docker).
 
-## Архитектура обучения
-
-Целевая Kubernetes-архитектура с разделением dev/prod, Redis/Celery, MinIO, MLflow и мониторингом описана в [отдельной схеме](kubernetes-architecture.md).
-
-```text
-React → Django API → очередь в PostgreSQL
-                           ↓
-                     ML-worker
-                           ↓
-                 отдельный ML-процесс
-                           ↓
-             метрики в БД + файлы в media
-```
-
-Django HTTP-запрос только сохраняет задачу и возвращает `202 Accepted`. `run_ml_worker` забирает задачу из БД, вызывает `ml_engine.runner` в отдельном процессе и сохраняет результат. Worker обрабатывает один эксперимент за раз. Блокировки PostgreSQL не дают двум workers забрать одну задачу; номер попытки не даёт устаревшему процессу перезаписать новые результаты.
-
-В `.env` можно задать `ML_TRAINING_TIMEOUT` (по умолчанию 300 секунд) и `ML_WORKER_POLL_INTERVAL` (2 секунды). Неудачный запуск сохраняет понятную ошибку без частичных результатов. Если worker аварийно выключился, новый worker пометит старое обучение как ошибочное после таймаута с запасом 60 секунд; затем запуск можно повторить. Ожидающая задача останется `queued`, пока worker не запущен.
-
-Основные файлы:
-
-| Файл | Назначение |
-| --- | --- |
-| `backend/experiments/views.py` | Запросы API, права доступа, скачивание |
-| `backend/experiments/services.py` | Правила состояний и постановка в очередь |
-| `backend/experiments/worker.py` | Получение задачи, таймаут, сохранение результата |
-| `backend/experiments/management/commands/run_ml_worker.py` | Команда запуска worker |
-| `backend/ml_engine/` | Подготовка данных, обучение, метрики, сериализация |
-
-Чтобы обработать одну задачу вручную вместо постоянного worker:
-
-```bash
-docker compose -f local.docker-compose.yml stop ml-worker
-docker compose -f local.docker-compose.yml run --rm backend python manage.py run_ml_worker --once
-docker compose -f local.docker-compose.yml start ml-worker
-```
-
-Redis/Celery не нужны для текущей небольшой очереди. Позже можно заменить механизм очереди и вынести файлы в объектное хранилище, сохранив независимый ML-модуль. Локальный Docker Compose использует development-сервер Django и не предназначен для production-развёртывания.
-
-## Миграции
-
-Миграция `0003_training_lifecycle` добавляет даты запуска/завершения, ошибку и идентификатор попытки. `0004_recover_legacy_runs` возвращает старые активные эксперименты без номера попытки в состояние `failed`, чтобы их можно было исправить и запустить заново. Рабочие пользователи, датасеты и эксперименты сохраняются.
+Проверить миграции:
 
 ```bash
 docker compose -f local.docker-compose.yml exec backend python manage.py showmigrations experiments
 docker compose -f local.docker-compose.yml exec backend python manage.py makemigrations --check --dry-run
 ```
 
-Миграции применяются автоматически при старте backend. Тесты ML-модуля независимы от Django и БД; отдельные команды приведены в [документации ML-модуля](ml-engine.md).
+Локальный Compose использует сервер разработки Django. Для серверного запуска предназначены [production Compose](production-deployment.md) и будущий [перенос в K3s](kubernetes.md#порядок-переноса-model-forge).
